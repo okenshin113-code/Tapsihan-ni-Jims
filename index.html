@@ -475,7 +475,7 @@ summary { font-weight: 700; cursor: pointer; min-height: 32px; }
             var obj = JSON.parse(r.result);
             if (!obj || typeof obj !== "object" || !obj.menu && !obj.stock && !obj.sales && !obj.moves) throw 0;
             if (!confirm("Replace everything on this phone with the backup?")) return;
-            data = obj; save(); ["menu", "stock", "sales", "moves", "closes", "expenses", "credits"].forEach(notify); alert("Restored.");
+            data = obj; save(); ["menu", "stock", "sales", "moves", "closes", "expenses", "credits", "shifts"].forEach(notify); alert("Restored.");
           } catch (x) { alert("That is not a Tapsihan backup file."); }
         };
         r.readAsText(f);
@@ -507,13 +507,14 @@ summary { font-weight: 700; cursor: pointer; min-height: 32px; }
 
   var S = {
     db: null, dl: null, admin: true, canWrite: true,
-    menu: [], stock: [], sales: [], moves: [], closes: [], expenses: [], credits: [], who: "", expArm: null, tira: {}, closeArm: false,
-    loaded: { menu: false, stock: false, sales: false, moves: false, closes: false, expenses: false, credits: false },
+    menu: [], stock: [], sales: [], moves: [], closes: [], expenses: [], credits: [], shifts: [], staff: ["PAYDA", "ROXANNE"], shiftIn: null, staffArm: null, shiftCash: "", shiftCount: {}, who: "", expArm: null, tira: {}, closeArm: false,
+    loaded: { menu: false, stock: false, sales: false, moves: false, closes: false, expenses: false, credits: false, shifts: false },
     tab: "sell", cart: {}, mods: {}, offR: 10, offE: 10, pay: "cash", cash: 0, disc: 0, period: "today", workDate: "", workTime: "", asOf: "", from: "", to: "", ordersMax: 12, voidArm: null, undoArm: null, events: [],
     sheet: null, slow: false, err: null, ready: false, derived: { onHand: {}, touched: {} }
   };
 
   S.riceCost = 0;
+  try { var _st = JSON.parse(localStorage.getItem("tapsihan_staff") || "null"); if (Array.isArray(_st) && _st.length >= 1) S.staff = _st.map(function (n, i) { return String(n || "").trim() || "Tindera " + (i + 1); }); } catch (e) {}
   try { var _o = JSON.parse(localStorage.getItem("tapsihan_off") || "{}"); if (isFinite(_o.r)) S.offR = _o.r; if (isFinite(_o.e)) S.offE = _o.e; if (isFinite(_o.c)) S.riceCost = _o.c; } catch (e) {}
     /* ---------- dates ---------- */
   var pad2 = function (n) { return String(n).padStart(2, "0"); };
@@ -775,6 +776,131 @@ summary { font-weight: 700; cursor: pointer; min-height: 32px; }
   var allLoaded = function () { var l = S.loaded; return l.menu && l.stock && l.sales && l.moves && l.closes; };
 
 /* ---------- SELL ---------- */
+
+  /* ---------- tindera shifts & handover ----------
+     Each handover is saved as a record: who went out, who came in, the stock count and the cash count.
+     Sales are stamped with the tindera on duty, so each tindera's sales, cash and stock can be audited. */
+  function shiftsOfDay(key) { var a = dparse(key), b = dayMs(key, 1); return S.shifts.filter(function (x) { return x.ts >= a && x.ts < b; }).sort(function (x, y) { return x.ts - y.ts || (x.at || 0) - (y.at || 0); }); }
+  function onDuty(key) { var l = shiftsOfDay(key); return l.length ? (l[l.length - 1].in || "") : ""; }
+  function shiftFrom(key) { var l = shiftsOfDay(key); return l.length ? l[l.length - 1].ts : dparse(key); }
+  function shiftStats(from, to) {
+    var rows = salesBetween(from, to);
+    var col = num(S.credits.filter(function (e) { return e.ts >= from && e.ts < to; }).reduce(function (t, e) { return t + e.amount; }, 0));
+    var exp = num(S.expenses.filter(function (e) { return e.ts >= from && e.ts < to; }).reduce(function (t, e) { return t + e.amount; }, 0));
+    var cash = sumPay(rows, "cash");
+    return { total: num(rows.reduce(function (a, x) { return a + x.total; }, 0)), orders: rows.length, cash: cash, gcash: sumPay(rows, "gcash"), utang: sumPay(rows, "utang"), col: col, exp: exp, cashExp: num(cash + col - exp) };
+  }
+  function shiftRecord(kind, who, inName, from, ts, st, cashCount, diffs) {
+    return { ts: ts, at: Date.now(), kind: kind, out: who, in: inName, from: from, sales: st.total, orders: st.orders, cash: st.cash, gcash: st.gcash, utang: st.utang, collected: st.col, expenses: st.exp, cashExp: st.cashExp, cashCount: cashCount, diffs: diffs || [] };
+  }
+  function clock(ms) { return timeStr(ms); }
+  function shiftItem(r, live) {
+    var diffs = r.diffs || [], miss = diffs.filter(function (d) { return d.got < d.exp; }), extra = diffs.filter(function (d) { return d.got > d.exp; });
+    var dtxt = function (a) { return a.map(function (d) { return esc(d.name) + " " + qf(Math.abs(num(d.exp - d.got))); }).join(", "); };
+    var cashChip = "";
+    if (live) cashChip = '<span class="chip">Expected cash ' + money(r.cashExp) + '</span>';
+    else if (typeof r.cashCount !== "number") cashChip = '<span class="chip warn">Cash not counted</span>';
+    else {
+      var cd = num(r.cashCount - r.cashExp);
+      cashChip = cd === 0 ? '<span class="chip ok">Cash OK ' + money(r.cashCount) + '</span>' : cd < 0 ? '<span class="chip bad">Cash short ' + money(-cd) + '</span>' : '<span class="chip warn">Cash over ' + money(cd) + '</span>';
+    }
+    var stockChip = live ? "" : (!diffs.length ? '<span class="chip ok">Stock OK</span>' : "");
+    var h = '<li><div class="sale"><div><b>' + esc(r.out) + '</b> <span class="chip' + (live ? " ok" : "") + '">' + (live ? "On duty now · since " + clock(r.from) : clock(r.from) + " – " + clock(r.ts)) + '</span>' +
+      (!live && r.in ? ' <span class="s-sub">→ ' + esc(r.in) + '</span>' : "") +
+      '<div class="s-items">' + r.orders + (r.orders === 1 ? " order" : " orders") + ' · Cash ' + money(r.cash) + ' · GCash ' + money(r.gcash) + (r.utang > 0 ? ' · Utang ' + money(r.utang) : "") + '</div>' +
+      '<div style="margin-top:6px;display:flex;gap:6px;flex-wrap:wrap">' + cashChip + stockChip + '</div>' +
+      (miss.length ? '<div class="s-items" style="color:var(--bad);margin-top:4px">Missing stock: ' + dtxt(miss) + '</div>' : "") +
+      (extra.length ? '<div class="s-items" style="color:var(--warn);margin-top:4px">Extra stock: ' + extra.map(function (d) { return esc(d.name) + " " + qf(num(d.got - d.exp)); }).join(", ") + '</div>' : "") +
+      '</div><div class="s-total">' + money(r.sales) + '</div></div></li>';
+    return h;
+  }
+  function shiftPanel(key, isToday) {
+    var recs = shiftsOfDay(key), segs = recs.filter(function (r) { return r.kind !== "start"; }), who = onDuty(key), cl = closeRec(key);
+    if (!recs.length) return "";
+    var h = '<h2 class="sec">Tindera shifts</h2>';
+    var by = {}; salesBetween(dparse(key), dayMs(key, 1)).forEach(function (x) { var k = x.by || "No tindera"; var a = by[k] || (by[k] = { n: 0, t: 0 }); a.n++; a.t += x.total; });
+    var names = Object.keys(by);
+    if (names.length > 1 || (names.length === 1 && recs.length > 1)) {
+      h += '<div class="panel rank" style="margin-bottom:10px">' + names.sort(function (a, b) { return by[b].t - by[a].t; }).map(function (k) { return '<div class="r"><span class="r-name">' + esc(k) + '</span><span class="r-val">' + by[k].n + ' orders · ' + money(by[k].t) + '</span></div>'; }).join("") + '</div>';
+    }
+    h += '<div class="panel"><ul class="list">';
+    segs.forEach(function (r) { h += shiftItem(r, false); });
+    if (who && !cl) { var st = shiftStats(shiftFrom(key), Date.now() > dayMs(key, 1) ? dayMs(key, 1) : Date.now()); h += shiftItem(shiftRecord("live", who, "", shiftFrom(key), Date.now(), st, null, []), true); }
+    if (!segs.length && !(who && !cl)) h += '<li><div class="empty">No handovers yet.</div></li>';
+    return h + "</ul></div>";
+  }
+  function dutyBar() {
+    var key = dstr(stamp()), who = onDuty(key);
+    if (isClosedDay(key)) return "";
+    if (who) return '<div class="panel" style="padding:10px 12px;margin-bottom:12px;display:flex;justify-content:space-between;align-items:center;gap:10px"><div><span class="s-sub">On duty</span><br><b style="font-size:18px">' + esc(who) + '</b></div><button class="btn small" type="button" data-act="open-handover">Handover</button></div>';
+    return '<div class="note" style="margin-bottom:12px">Nobody is on duty. Choose the tindera so her sales are saved under her name. <button class="btn small primary" type="button" data-act="open-handover">Choose tindera</button></div>';
+  }
+  function openHandover() {
+    var ts = stamp(), key = dstr(ts), who = onDuty(key);
+    S.sheet = { type: "shift" };
+    if (!who) {
+      var h0 = '<h2>Who is selling?</h2><p class="lead">Tap the tindera who is on duty now. Every sale will be saved under her name.</p>';
+      S.staff.forEach(function (n, i) { h0 += '<button class="btn primary" type="button" style="width:100%;margin-bottom:10px;min-height:54px;font-size:18px" data-act="duty-start" data-i="' + i + '">' + esc(n) + '</button>'; });
+      h0 += '<div class="actions"><button class="btn" data-act="close" type="button">Cancel</button></div>';
+      openSheet(h0); return;
+    }
+    var st = shiftStats(shiftFrom(key), ts), ref = ledgerAt(S.events, ts);
+    var h = '<h2>Handover</h2><p class="lead"><b>' + esc(who) + '</b> is going out. Count the stock and the cash, then choose who comes in.</p>';
+    h += '<p class="s-sub" style="margin:0 0 6px;font-weight:700">Who comes in?</p><div class="seg" role="group" aria-label="Incoming tindera" style="flex-wrap:wrap">';
+    S.staff.forEach(function (n, i) { if (n === who) return; h += '<button type="button" style="min-width:30%" data-act="shift-in" data-i="' + i + '" aria-pressed="' + (S.shiftIn === i) + '">' + esc(n) + '</button>'; });
+    h += '<button type="button" data-act="shift-in" data-i="-1" aria-pressed="' + (S.shiftIn === -1) + '">Nobody</button></div>';
+    h += '<div class="panel" style="padding:12px;margin:14px 0 4px"><b>This shift so far</b><div class="s-sub">' + st.orders + ' orders · ' + money(st.total) + ' sales · Cash ' + money(st.cash) + ' · GCash ' + money(st.gcash) + (st.utang > 0 ? ' · Utang ' + money(st.utang) : '') + '</div></div>';
+    h += '<label class="field"><span>Cash handed over (₱) <span class="hint">(app expects ' + money(st.cashExp) + ': cash sales' + (st.col > 0 ? ' + utang paid' : '') + (st.exp > 0 ? ' − expenses' : '') + ')</span></span><input id="shCash" inputmode="decimal" placeholder="' + esc(qf(st.cashExp)) + '" value="' + esc(S.shiftCash) + '"></label>';
+    var items = S.stock.slice().sort(byOrder).filter(function (x) { return ref.touched[x.id]; });
+    h += '<p class="s-sub" style="margin:14px 0 6px;font-weight:700">Stock count (tira)</p>';
+    if (!items.length) h += '<div class="s-sub">No stock entered yet.</div>';
+    else {
+      h += '<div class="panel"><ul class="list">';
+      items.forEach(function (x) {
+        var v = S.shiftCount[x.id] !== undefined ? S.shiftCount[x.id] : qf(ref.on[x.id]);
+        h += '<li><div class="cline"><div><div class="c-name">' + esc(x.name) + '</div><div class="c-sub">App says ' + qf(ref.on[x.id]) + ' ' + esc(x.unit || "pc") + '</div></div><input class="tiraIn shIn" inputmode="decimal" data-id="' + esc(x.id) + '" value="' + esc(v) + '" aria-label="Count ' + esc(x.name) + '"></div></li>';
+      });
+      h += '</ul></div><p class="s-sub" style="margin:8px 2px 0">Change a number only if the real count is different. The app then uses your count from now on, and the difference is recorded for the audit.</p>';
+    }
+    var inN = S.shiftIn === null ? "" : S.shiftIn === -1 ? "" : S.staff[S.shiftIn];
+    h += '<div class="actions"><button class="btn" data-act="close" type="button">Cancel</button><button class="btn primary" data-act="do-handover" type="button">' + (S.shiftIn === null ? "Choose who comes in" : S.shiftIn === -1 ? "End shift" : esc(inN) + " received · Confirm") + '</button></div>';
+    var sh = $(".sheet-panel"), top = sh ? sh.scrollTop : 0;
+    openSheet(h); var sp = $(".sheet-panel"); if (sp) sp.scrollTop = top;
+  }
+  function startDuty(i) {
+    if (!guardWrite()) return;
+    var name = S.staff[i]; if (!name) return;
+    var ts = stamp(), key = dstr(ts);
+    if (isClosedDay(key)) { toast("The shop is closed. Reopen it on the Close tab first.", true); return; }
+    S.db.collection("shifts").add({ ts: ts, at: Date.now(), kind: "start", out: "", in: name, from: ts, diffs: [] }).catch(fail);
+    closeSheet(); toast(name + " is on duty"); renderAll();
+  }
+  function doHandover() {
+    if (!guardWrite()) return;
+    var ts = stamp(), key = dstr(ts), who = onDuty(key);
+    if (!who) return;
+    if (isClosedDay(key)) { toast("The shop is closed. Reopen it on the Close tab first.", true); return; }
+    if (S.shiftIn === null) { toast("Choose who comes in (or Nobody).", true); return; }
+    var inName = S.shiftIn === -1 ? "" : S.staff[S.shiftIn];
+    var cashCount = null, raw = String(S.shiftCash).trim();
+    if (raw !== "") { cashCount = parseNum(raw); if (!(cashCount >= 0)) { toast("Cash must be a number, 0 or more.", true); return; } }
+    var ref = ledgerAt(S.events, ts), moves = [], diffs = [], bad = false;
+    S.stock.forEach(function (st) {
+      if (!ref.touched[st.id]) return;
+      var r = S.shiftCount[st.id]; if (r === undefined || String(r).trim() === "") return;
+      var q = parseNum(r); if (!(q >= 0)) { bad = true; return; }
+      var cur = ref.on[st.id] || 0; if (num(q - cur) === 0) return;
+      moves.push({ ts: ts, at: Date.now(), stockId: st.id, qty: num(q - cur), kind: "adjust", note: "Handover " + who + " → " + (inName || "end of shift"), counted: q, by: who });
+      diffs.push({ id: st.id, name: st.name, exp: cur, got: q });
+    });
+    if (bad) { toast("Stock counts must be numbers, 0 or more.", true); return; }
+    var from = shiftFrom(key), st2 = shiftStats(from, ts);
+    moves.forEach(function (m) { S.db.collection("moves").add(m).catch(fail); });
+    S.db.collection("shifts").add(shiftRecord(inName ? "handover" : "end", who, inName, from, ts, st2, cashCount, diffs)).catch(fail);
+    S.shiftIn = null; S.shiftCash = ""; S.shiftCount = {};
+    closeSheet(); toast(inName ? who + " → " + inName + ". Handover saved." : who + " ended the shift."); renderAll();
+  }
+
   /* ---------- payments, utang, expenses ---------- */
   function isCashPay(x) { return x.pay !== "gcash" && x.pay !== "utang"; }
   function sumPay(rows, kind) { return num(rows.filter(function (x) { return kind === "cash" ? isCashPay(x) : x.pay === kind; }).reduce(function (a, x) { return a + x.total; }, 0)); }
@@ -1007,7 +1133,7 @@ summary { font-weight: 700; cursor: pointer; min-height: 32px; }
     if (!allLoaded()) return '<div class="empty"><b>Loading menu…</b></div>';
     var items = S.menu.filter(function (m) { return m.active !== false; }).sort(byOrder);
     if (!items.length) return '<div class="empty"><b>No menu items yet</b>' + (S.admin ? 'Add your dishes on the Menu tab.' : 'The owner needs to add the menu first.') + '</div>';
-    var h = "", untouched = S.stock.filter(function (s) { return !S.derived.touched[s.id]; }).length;
+    var h = dutyBar(), untouched = S.stock.filter(function (s) { return !S.derived.touched[s.id]; }).length;
     (function () { var k = dstr(workStart()), r = salesBetween(workStart(), dayMs(k, 1)); h += targetBlock(k, r.reduce(function (a, x) { return a + x.total; }, 0), r, { closed: false }); })();
     if (isClosedDay(dstr(workStart()))) h += '<div class="note">The shop is closed. <button class="btn small" data-act="reopen" type="button">Reopen shop</button></div>';
     if (S.stock.length && untouched === S.stock.length) h += '<div class="note info">No stock entered yet, so nothing can be sold. Add stock first. <button class="btn small" data-act="tab" data-tab="stock" type="button">Add stock</button></div>';
@@ -1079,6 +1205,7 @@ summary { font-weight: 700; cursor: pointer; min-height: 32px; }
     }
     var lack = cartShort(lines);
     if (lack.length) h += '<div class="note" style="margin-top:12px">Not enough stock: ' + esc(lack.join("; ")) + '. Remove items or add stock first.</div>';
+    h += '<div class="s-sub" style="margin-top:10px">Sale will be saved under <b>' + esc(onDuty(dstr(stamp())) || "nobody yet") + '</b>.</div>';
     h += '<div class="actions"><button class="btn" data-act="clear-cart" type="button">Clear</button><button class="btn primary" data-act="charge" type="button"' + (S.canWrite && S.db && !lack.length ? "" : " disabled") + '>Record sale</button></div>';
     return h;
   }
@@ -1094,11 +1221,13 @@ summary { font-weight: 700; cursor: pointer; min-height: 32px; }
   function charge() {
     if (!guardWrite()) return;
     if (isClosedDay(dstr(stamp()))) { toast("The shop is closed. Reopen it on the Close tab first.", true); return; }
+    var by = onDuty(dstr(stamp()));
+    if (!by) { toast("Choose who is on duty first.", true); openHandover(); return; }
     if (S.pay === "utang" && !wkey(S.who)) { toast("Type the customer’s name for utang.", true); return; }
     var lackC = cartShort(cartLines()); if (lackC.length) { toast("Not enough stock: " + lackC.join("; "), true); return; }
     var lines = cartLines(); if (!lines.length) return;
     var disc = num(cartDisc()), total = cartTotal();
-    var rec = { ts: stamp(), at: Date.now(), lines: lines, total: total, pay: S.pay, voided: false };
+    var rec = { ts: stamp(), at: Date.now(), lines: lines, total: total, pay: S.pay, voided: false, by: by };
     if (disc > 0) rec.discount = disc;
     if (S.pay === "utang") rec.who = String(S.who).trim();
     if (S.pay === "cash" && S.cash > 0) rec.tendered = S.cash;
@@ -1237,7 +1366,8 @@ summary { font-weight: 700; cursor: pointer; min-height: 32px; }
       ["15. Profit and costing", ["On the <b>Stock</b> tab, open an item’s settings and type its <b>cost per unit</b> (what you pay for one tapsilog, one egg, one styro).", "On the <b>Menu</b> tab, type your <b>Rice cost per serving</b>. Rice is not counted in stock because you serve it in a container, so this is only for profit.", "Each dish on the Menu tab then shows its <b>Cost</b> and <b>Profit</b>.", "The <b>Close</b> tab and <b>Reports</b> show your estimated profit, and your take-home after expenses."]],
       ["16. Mistake in stock?", ["On the <b>Stock</b> tab, scroll to <b>Recent changes</b> and tap <b>Undo</b> twice on the wrong entry.", "Or just do a new <b>Tira (remaining)</b> count to correct the number."]],
       ["17. Changing a price, egg or rice on a dish", ["Go to the <b>Menu</b> tab and tap the dish.", "Change the price, or untick <b>Show on the Sell screen</b> to hide it.", "<b>Comes with 1 egg</b> and <b>Comes with rice</b> are ticked for every meal. Untick them for a dish that has no egg or no rice. Extras (Rice, Egg, Styro) do not have these.", "Tap <b>Save item</b>."]],
-      ["18. Important", ["All your data is saved <b>on this phone only</b>. Do not clear the browser’s data or history.", "Tap <b>Back up data</b> (Menu tab) every few days, and keep the file safe. It includes your utang and expenses.", "To use another phone, open the link there and tap <b>Restore data</b> with your backup file.", "<b>Delete test sales and stock history</b> erases all sales, stock, expenses and utang payments. Only use it before you start for real."]]
+      ["18. Tindera handover", ["Your tinderas start as <b>PAYDA</b> and <b>ROXANNE</b>. On the <b>Menu</b> tab, under <b>Tinderas</b>, you can change a name, tap <b>+ Add tindera</b>, or <b>Remove</b> one (not the one on duty).", "When the shop opens, the app asks <b>Who is selling?</b>. Tap the tindera on duty. Every sale is then saved under her name.", "When one goes out and another comes in, tap <b>Handover</b> on the Sell tab. Tap who is coming in.", "The tindera going out counts the cash and the stock. Type the cash she hands over. Change a stock number only if the real count is different.", "Tap <b>(name) received · Confirm</b>. The app saves who went out, who came in, the time, and any cash or stock that is short or over.", "It can happen many times a day: PAYDA out, ROXANNE in, then ROXANNE out, PAYDA in, and so on.", "See every shift on the <b>Close</b> tab under <b>Tindera shifts</b>. When you close the shop, the tindera on duty is ended automatically."]],
+      ["19. Important", ["All your data is saved <b>on this phone only</b>. Do not clear the browser’s data or history.", "Tap <b>Back up data</b> (Menu tab) every few days, and keep the file safe. It includes your utang and expenses.", "To use another phone, open the link there and tap <b>Restore data</b> with your backup file.", "<b>Delete test sales and stock history</b> erases all sales, stock, expenses and utang payments. Only use it before you start for real."]]
     ];
     return '<style>.man{margin:6px 0 4px;padding-left:20px}.man li{margin:6px 0}</style><h2 class="sec">How to use this app</h2><div class="panel"><ul class="list">' + M.map(function (x) {
       return '<li><details><summary class="dsum"><span><b style="margin:0;font-size:16px">' + x[0] + '</b></span></summary><div class="dbody"><ol class="man">' + x[1].map(function (t) { return "<li>" + t + "</li>"; }).join("") + "</ol></div></details></li>";
@@ -1250,6 +1380,13 @@ summary { font-weight: 700; cursor: pointer; min-height: 32px; }
     var h = S.admin ? '<p><button class="btn primary" data-act="new-menu" type="button">Add menu item</button></p>' : '<div class="note info">Prices and recipes are set by the owner.</div>';
     h += '<h2 class="sec">No rice / no egg price off</h2><div class="panel" style="padding:14px"><p style="margin:0 0 6px">Amount taken off a dish for each order without rice or without egg. You can change it any time.</p><div class="row2"><label class="field"><span>No rice (₱ off)</span><input id="offRIn" inputmode="decimal" value="' + esc(S.offR) + '"></label><label class="field"><span>No egg (₱ off)</span><input id="offEIn" inputmode="decimal" value="' + esc(S.offE) + '"></label></div></div>';
     h += '<h2 class="sec">Rice cost (for profit)</h2><div class="panel" style="padding:14px"><p style="margin:0 0 6px">Your rice is not counted in stock because you serve it in a container. Type how much one serving of rice costs you, so the app can show your real profit. Every meal comes with 1 rice, so this cost is added to each meal (not to Extras).</p><label class="field"><span>Rice cost per serving (₱)</span><input id="riceCostIn" inputmode="decimal" value="' + esc(S.riceCost) + '"></label></div>';
+    h += '<h2 class="sec">Tinderas</h2><div class="panel" style="padding:14px"><p style="margin:0 0 6px">The tinderas who share the shop. Change a name, add another tindera, or remove one. Use <b>Handover</b> on the Sell tab when one goes out and another comes in.</p>' +
+      S.staff.map(function (n, i) {
+        var duty = onDuty(dstr(stamp())) === n, armed = S.staffArm === i;
+        return '<div style="display:flex;gap:8px;align-items:flex-end;margin-bottom:8px"><label class="field" style="flex:1;margin:0"><span>Tindera ' + (i + 1) + (duty ? ' · on duty now' : '') + '</span><input id="staff' + i + '" maxlength="20" value="' + esc(n) + '"></label>' +
+          '<button class="btn small' + (armed ? ' primary' : '') + '" type="button" data-act="rm-staff" data-i="' + i + '"' + (S.staff.length <= 1 || duty ? ' disabled' : '') + ' style="min-height:46px">' + (armed ? 'Tap again' : 'Remove') + '</button></div>';
+      }).join("") +
+      '<button class="btn" type="button" data-act="add-staff" style="width:100%;margin-top:4px">+ Add tindera</button><p class="s-sub" style="margin:8px 0 0">Past shifts and sales keep the name they were saved with.</p></div>';
     h += manualHtml();
     if (!items.length) return h + '<div class="empty"><b>No menu items yet</b></div>';
     var groups = [], seen = {};
@@ -1416,7 +1553,7 @@ summary { font-weight: 700; cursor: pointer; min-height: 32px; }
     shown.forEach(function (s) {
       var items = (s.lines || []).map(function (l) { return l.qty + " " + l.name + optNote(l); }).join(", ");
       var armed = S.voidArm === s.id;
-      h += '<li><div class="sale' + (s.voided ? " void" : "") + '"><div><b>' + new Date(s.ts).toLocaleDateString("en-PH", { month: "short", day: "numeric" }) + " " + timeStr(s.ts) + '</b> <span class="chip">' + esc(payLabel(s)) + "</span>" + (s.voided ? ' <span class="chip bad">Voided</span>' : "") + '<div class="s-items">' + esc(items) + (s.discount ? " · discount " + money(s.discount) : "") + '</div></div><div class="s-total">' + money(s.total) + "</div></div>" +
+      h += '<li><div class="sale' + (s.voided ? " void" : "") + '"><div><b>' + new Date(s.ts).toLocaleDateString("en-PH", { month: "short", day: "numeric" }) + " " + timeStr(s.ts) + '</b> <span class="chip">' + esc(payLabel(s)) + "</span>" + (s.by ? ' <span class="chip">' + esc(s.by) + '</span>' : "") + (s.voided ? ' <span class="chip bad">Voided</span>' : "") + '<div class="s-items">' + esc(items) + (s.discount ? " · discount " + money(s.discount) : "") + '</div></div><div class="s-total">' + money(s.total) + "</div></div>" +
         (s.voided || !S.canWrite ? "" : '<div class="s-acts"><button class="btn small' + (armed ? " primary" : "") + '" type="button" data-act="void" data-id="' + esc(s.id) + '">' + (armed ? "Tap again to void this order" : "Void") + "</button></div>") + "</li>";
     });
     h += "</ul></div>";
@@ -1426,11 +1563,11 @@ summary { font-weight: 700; cursor: pointer; min-height: 32px; }
   function exportCsv() {
     var r = getRange(), rows = salesBetween(r.start, r.end);
     var q = function (v) { return '"' + String(v).replace(/"/g, '""') + '"'; };
-    var out = ["Date,Time,Item,Qty,Unit price,Line total,Payment"];
+    var out = ["Date,Time,Item,Qty,Unit price,Line total,Payment,Tindera"];
     rows.sort(function (a, b) { return a.ts - b.ts; }).forEach(function (s) {
       var pay = q(payLabel(s));
-      s.lines.forEach(function (l) { out.push([dstr(s.ts), timeStr(s.ts), q(l.name + optNote(l)), l.qty, l.price, num(l.qty * l.price - (l.off || 0)), pay].join(",")); });
-      if (s.discount) out.push([dstr(s.ts), timeStr(s.ts), q("Discount"), 1, -s.discount, -s.discount, pay].join(","));
+      s.lines.forEach(function (l) { out.push([dstr(s.ts), timeStr(s.ts), q(l.name + optNote(l)), l.qty, l.price, num(l.qty * l.price - (l.off || 0)), pay, q(s.by || "")].join(",")); });
+      if (s.discount) out.push([dstr(s.ts), timeStr(s.ts), q("Discount"), 1, -s.discount, -s.discount, pay, q(s.by || "")].join(","));
     });
     if (out.length === 1) { toast("No sales to download.", true); return; }
     S.dl.save({ filename: "tapsihan-sales-" + r.a + (r.a === r.b ? "" : "_to_" + r.b) + ".csv", data: out.join("\n") }).then(function () { toast("Saved"); }).catch(function (e) { if (!e || e.code !== "declined") toast("Download is not available here.", true); });
@@ -1459,6 +1596,8 @@ summary { font-weight: 700; cursor: pointer; min-height: 32px; }
       else h += '<div class="panel" style="padding:12px;margin-top:10px"><b>Profit</b><div class="s-sub">Add a cost on each Stock item and your rice cost on the Menu tab to see your profit here.</div></div>';
     })();
     h += '<div style="margin-top:10px"></div>' + targetBlock(key, total, rows, cl ? { closed: true, saved: (cl.target > 0 ? cl.target : stockPlan(key).total) } : { closed: false });
+    h += shiftPanel(key, isToday);
+    if (!cl && onDuty(key)) h += '<p style="margin:10px 0 0"><button class="btn" type="button" data-act="open-handover">Tindera handover</button></p>';
     var agg = {};
     rows.forEach(function (s) { (s.lines || []).forEach(function (l) { var a = agg[l.id] || (agg[l.id] = { name: l.name, qty: 0, rev: 0 }); a.qty += l.qty; a.rev += l.qty * l.price - (l.off || 0); }); });
     var rank = Object.keys(agg).map(function (k) { return agg[k]; }).sort(function (a, b) { return b.qty - a.qty || b.rev - a.rev; }).slice(0, 5);
@@ -1513,6 +1652,8 @@ summary { font-weight: 700; cursor: pointer; min-height: 32px; }
     var rows = salesBetween(dayMs(key, 0), dayMs(key, 1)), total = rows.reduce(function (a, s) { return a + s.total; }, 0);
     var cash = sumPay(rows, "cash");
     recs.forEach(function (r) { S.db.collection("moves").add(r).catch(fail); });
+    var dutyWho = onDuty(key);
+    if (dutyWho) { var fr = shiftFrom(key), sst = shiftStats(fr, ts); S.db.collection("shifts").add(shiftRecord("end", dutyWho, "", fr, ts, sst, null, recs.map(function (r) { var st3 = stockById(r.stockId); return { id: r.stockId, name: st3 ? st3.name : "(removed)", exp: num(r.counted - r.qty), got: r.counted }; }).filter(function (d) { return d.exp !== d.got; }))).catch(fail); }
     S.db.doc("closes/c" + key).set({ date: key, ts: ts, at: Date.now(), total: total, orders: rows.length, cash: cash, gcash: sumPay(rows, "gcash"), utang: sumPay(rows, "utang"), expenses: dayExpenses(key), collected: dayCollected(key), target: stockPlan(key).total, reached: stockPlan(key).total > 0 ? total >= stockPlan(key).total : null }).catch(fail);
     S.tira = {}; S.closeArm = false; toast("Shop closed. Salamat!");
   }
@@ -1559,7 +1700,7 @@ summary { font-weight: 700; cursor: pointer; min-height: 32px; }
   function doReset() {
     if ($("#resetIn").value.trim().toUpperCase() !== "RESET") { toast("Type RESET to confirm.", true); return; }
     if (!guardWrite()) return;
-    var jobs = S.sales.map(function (s) { return "sales/" + s.id; }).concat(S.moves.map(function (m) { return "moves/" + m.id; })).concat(S.closes.map(function (c) { return "closes/" + c.id; })).concat(S.expenses.map(function (c) { return "expenses/" + c.id; })).concat(S.credits.map(function (c) { return "credits/" + c.id; }));
+    var jobs = S.sales.map(function (s) { return "sales/" + s.id; }).concat(S.moves.map(function (m) { return "moves/" + m.id; })).concat(S.closes.map(function (c) { return "closes/" + c.id; })).concat(S.expenses.map(function (c) { return "expenses/" + c.id; })).concat(S.credits.map(function (c) { return "credits/" + c.id; })).concat(S.shifts.map(function (c) { return "shifts/" + c.id; }));
     closeSheet(); S.cart = {}; S.cash = 0; toast("Deleting " + jobs.length + " records…");
     (async function () {
       for (var i = 0; i < jobs.length; i += 10) await Promise.all(jobs.slice(i, i + 10).map(function (p) { return S.db.doc(p).delete(); }));
@@ -1572,7 +1713,7 @@ summary { font-weight: 700; cursor: pointer; min-height: 32px; }
     var b = e.target.closest("[data-act]"); if (!b) return;
     var a = b.dataset.act, id = b.dataset.id;
     switch (a) {
-      case "tab": S.tab = b.dataset.tab; S.closeArm = false; S.tira = {}; S.voidArm = null; S.undoArm = null; S.expArm = null; window.scrollTo(0, 0); renderAll(); break;
+      case "tab": S.tab = b.dataset.tab; S.closeArm = false; S.tira = {}; S.voidArm = null; S.undoArm = null; S.expArm = null; S.staffArm = null; window.scrollTo(0, 0); renderAll(); break;
       case "jump": var gt = document.getElementById("grp-" + b.dataset.g); if (gt) gt.scrollIntoView({ block: "start" }); break;
       case "add": var pr1 = addProblem(id); if (pr1) { toast("Can’t sell: " + pr1, true); break; } if (isClosedDay(dstr(workStart()))) { toast("The shop is closed. Reopen it on the Close tab.", true); break; } S.cart[id] = (S.cart[id] || 0) + 1; renderAll(); break;
       case "dec": if (S.cart[id] > 1) S.cart[id]--; else { delete S.cart[id]; delete S.mods[id]; } renderAll(); break;
@@ -1636,12 +1777,27 @@ summary { font-weight: 700; cursor: pointer; min-height: 32px; }
       case "asof-now": S.asOf = ""; renderAll(); break;
       case "open-reset": if (S.admin) resetSheet(); break;
       case "do-reset": doReset(); break;
+      case "open-handover": S.shiftIn = null; S.shiftCash = ""; S.shiftCount = {}; openHandover(); break;
+      case "duty-start": startDuty(+b.dataset.i); break;
+      case "shift-in": S.shiftIn = +b.dataset.i; openHandover(); break;
+      case "do-handover": doHandover(); break;
+      case "add-staff":
+        if (S.staff.length >= 8) { toast("That is enough tinderas for one shop.", true); break; }
+        var nn2 = "Tindera " + (S.staff.length + 1); while (S.staff.indexOf(nn2) >= 0) nn2 += "+";
+        S.staff.push(nn2); S.staffArm = null; try { localStorage.setItem("tapsihan_staff", JSON.stringify(S.staff)); } catch (x) {}
+        toast("Added. Type her name."); renderAll(); var ni = document.getElementById("staff" + (S.staff.length - 1)); if (ni) { ni.focus(); ni.select(); } break;
+      case "rm-staff":
+        var ri = +b.dataset.i; if (S.staffArm !== ri) { S.staffArm = ri; renderAll(); break; }
+        if (S.staff.length > 1 && onDuty(dstr(stamp())) !== S.staff[ri]) { S.staff.splice(ri, 1); try { localStorage.setItem("tapsihan_staff", JSON.stringify(S.staff)); } catch (x) {} toast("Removed"); }
+        S.staffArm = null; renderAll(); break;
 
     }
   });
   document.addEventListener("input", function (e) {
     if (e.target.classList && e.target.classList.contains("tiraIn")) { S.tira[e.target.dataset.id] = e.target.value; if (S.closeArm) { S.closeArm = false; var cb = $('[data-act="close-shop"]'); if (cb) cb.textContent = "Close shop for today"; } }
     if (e.target.id === "whoIn") S.who = e.target.value;
+    if (e.target.id === "shCash") S.shiftCash = e.target.value;
+    if (e.target.classList && e.target.classList.contains("shIn")) S.shiftCount[e.target.dataset.id] = e.target.value;
     if (e.target.id === "cashIn") { S.cash = parseNum(e.target.value) || 0; updateChange(); }
     if (e.target.id === "discIn") {
       S.disc = Math.max(parseNum(e.target.value) || 0, 0);
@@ -1654,6 +1810,14 @@ summary { font-weight: 700; cursor: pointer; min-height: 32px; }
     if (id === "fromIn") { if (v) { S.from = v; S.ordersMax = 12; renderAll(); } }
     else if (id === "toIn") { if (v) { S.to = v; S.ordersMax = 12; renderAll(); } }
     else if (id === "asOfIn") { S.asOf = v || ""; renderAll(); }
+    else if (/^staff\d+$/.test(id || "")) {
+      var si = +id.slice(5), oldN = S.staff[si], nn = String(v || "").trim() || "Tindera " + (si + 1);
+      if (S.staff.some(function (x, j) { return j !== si && x.toLowerCase() === nn.toLowerCase(); })) { toast("Two tinderas cannot have the same name.", true); renderAll(); return; }
+      if (oldN === undefined) return;
+      S.staff[si] = nn;
+      try { localStorage.setItem("tapsihan_staff", JSON.stringify(S.staff)); } catch (x) {}
+      toast("Saved"); renderAll();
+    }
     else if (id === "riceCostIn") {
       var rv = parseNum(v || 0); if (!(rv >= 0)) { toast("Enter an amount like 8.", true); return; }
       S.riceCost = rv;
@@ -1689,7 +1853,7 @@ summary { font-weight: 700; cursor: pointer; min-height: 32px; }
     }
     if (!db) { renderAll(); return; }
     var timer = setTimeout(function () { S.slow = true; renderAll(); }, 10000);
-    ["menu", "stock", "sales", "moves", "closes", "expenses", "credits"].forEach(function (name) {
+    ["menu", "stock", "sales", "moves", "closes", "expenses", "credits", "shifts"].forEach(function (name) {
       db.collection(name).onSnapshot(function (snap) {
         S[name] = snap.docs.map(function (d) { var o = Object.assign({}, d.data()); o.id = d.id; return o; });
         S.loaded[name] = true;

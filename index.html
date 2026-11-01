@@ -160,7 +160,7 @@ h2.sec { scroll-margin-top: 88px; }
   position: fixed; left: 0; right: 0; bottom: 0; z-index: 7; height: var(--tabh);
   padding: 0 var(--gr) env(safe-area-inset-bottom, 0px) var(--gl); background: var(--surface); border-top: 1px solid var(--line);
 }
-.tabbar .wrap { display: grid; grid-template-columns: repeat(5, 1fr); height: 100%; }
+.tabbar .wrap { display: grid; grid-template-columns: repeat(6, 1fr); height: 100%; }
 .tabbar button {
   border: 0; background: transparent; color: var(--muted); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;
   font-size: 12px; font-weight: 700; letter-spacing: .02em; position: relative;
@@ -297,18 +297,37 @@ summary { font-weight: 700; cursor: pointer; min-height: 32px; }
   #sheet { align-items: center; }
   .sheet-panel { border-radius: 16px; border-bottom: 1px solid var(--line); max-height: 88%; }
 }
+
+/* calculator */
+.calcbtn { margin-top: 6px; border: 1px solid var(--line); background: var(--surface); border-radius: 999px; min-height: 36px; min-width: 40px; padding: 0 10px; display: inline-flex; align-items: center; justify-content: center; color: var(--ink); }
+.calcbtn svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.brandrow { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.calc-disp { background: var(--surface-2); border-radius: 10px; padding: 10px 14px; margin: 8px 0 10px; text-align: right; min-height: 92px; display: flex; flex-direction: column; justify-content: flex-end; overflow: hidden; }
+.calc-expr { color: var(--muted); font-size: 16px; min-height: 22px; word-break: break-all; font-variant-numeric: tabular-nums; }
+.calc-res { font-family: var(--display); font-weight: 800; font-size: 38px; line-height: 1.1; word-break: break-all; font-variant-numeric: tabular-nums; }
+.calc-res.err { font-size: 20px; color: var(--accent); }
+.calc-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+.calc-grid button { min-height: 56px; border: 1px solid var(--line); background: var(--surface); border-radius: 10px; font-size: 22px; font-weight: 700; color: var(--ink); }
+.calc-grid button:active { background: var(--surface-2); }
+.calc-grid .op { background: var(--surface-2); color: var(--accent); }
+.calc-grid .eq { background: var(--accent); border-color: var(--accent); color: var(--on-accent); grid-row: span 2; }
+.calc-grid .fn { background: var(--surface-2); }
+.calc-hist { margin: 10px 0 0; padding: 0; list-style: none; }
+.calc-hist li button { width: 100%; text-align: right; border: 0; background: transparent; padding: 6px 4px; color: var(--muted); font-size: 14px; border-bottom: 1px solid var(--line); }
+.calc-hist li button b { color: var(--ink); }
 </style>
 
 <header class="top">
   <div class="wrap">
     <div class="brand">
       <h1>Tapsihan ni Jim's</h1>
-      <button type="button" class="datebtn" id="datebtn" data-act="open-date" aria-label="Change the date for new entries"></button>
+      <div class="brandrow"><button type="button" class="datebtn" id="datebtn" data-act="open-date" aria-label="Change the date for new entries"></button><button type="button" class="calcbtn" data-act="open-calc" aria-label="Calculator"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="3" width="14" height="18" rx="2"/><path d="M8 7h8M8 11h.01M12 11h.01M16 11h.01M8 15h.01M12 15h.01M16 15h.01M8 18h.01M12 18h.01M16 18h.01"/></svg></button></div>
     </div>
     <div class="today" aria-live="polite">
       <small id="todayLabel">Today</small>
       <b id="todayTotal">₱0</b>
       <span id="todayOrders">0 orders</span>
+      <span id="todayExp" hidden style="display:block"></span>
     </div>
   </div>
 </header>
@@ -338,6 +357,9 @@ summary { font-weight: 700; cursor: pointer; min-height: 32px; }
     </button>
     <button type="button" data-act="tab" data-tab="close">
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>Close<span class="dot" id="closeDot" hidden>✓</span>
+    </button>
+    <button type="button" data-act="tab" data-tab="money">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M9 8h4.5a2.5 2.5 0 0 1 0 5H9M9 8v9M8 11h6"/></svg>Money<span class="dot" id="moneyDot" hidden></span>
     </button>
     <button type="button" data-act="tab" data-tab="menu">
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 6h13M8 12h13M8 18h13M3.5 6h.01M3.5 12h.01M3.5 18h.01"/></svg>Menu
@@ -453,7 +475,7 @@ summary { font-weight: 700; cursor: pointer; min-height: 32px; }
             var obj = JSON.parse(r.result);
             if (!obj || typeof obj !== "object" || !obj.menu && !obj.stock && !obj.sales && !obj.moves) throw 0;
             if (!confirm("Replace everything on this phone with the backup?")) return;
-            data = obj; save(); ["menu", "stock", "sales", "moves", "closes"].forEach(notify); alert("Restored.");
+            data = obj; save(); ["menu", "stock", "sales", "moves", "closes", "expenses", "credits"].forEach(notify); alert("Restored.");
           } catch (x) { alert("That is not a Tapsihan backup file."); }
         };
         r.readAsText(f);
@@ -485,13 +507,14 @@ summary { font-weight: 700; cursor: pointer; min-height: 32px; }
 
   var S = {
     db: null, dl: null, admin: true, canWrite: true,
-    menu: [], stock: [], sales: [], moves: [], closes: [], tira: {}, closeArm: false,
-    loaded: { menu: false, stock: false, sales: false, moves: false, closes: false },
+    menu: [], stock: [], sales: [], moves: [], closes: [], expenses: [], credits: [], who: "", expArm: null, tira: {}, closeArm: false,
+    loaded: { menu: false, stock: false, sales: false, moves: false, closes: false, expenses: false, credits: false },
     tab: "sell", cart: {}, mods: {}, offR: 10, offE: 10, pay: "cash", cash: 0, disc: 0, period: "today", workDate: "", workTime: "", asOf: "", from: "", to: "", ordersMax: 12, voidArm: null, undoArm: null, events: [],
     sheet: null, slow: false, err: null, ready: false, derived: { onHand: {}, touched: {} }
   };
 
-  try { var _o = JSON.parse(localStorage.getItem("tapsihan_off") || "{}"); if (isFinite(_o.r)) S.offR = _o.r; if (isFinite(_o.e)) S.offE = _o.e; } catch (e) {}
+  S.riceCost = 0;
+  try { var _o = JSON.parse(localStorage.getItem("tapsihan_off") || "{}"); if (isFinite(_o.r)) S.offR = _o.r; if (isFinite(_o.e)) S.offE = _o.e; if (isFinite(_o.c)) S.riceCost = _o.c; } catch (e) {}
     /* ---------- dates ---------- */
   var pad2 = function (n) { return String(n).padStart(2, "0"); };
   var dstr = function (ms) { var d = new Date(ms); return d.getFullYear() + "-" + pad2(d.getMonth() + 1) + "-" + pad2(d.getDate()); };
@@ -533,7 +556,7 @@ summary { font-weight: 700; cursor: pointer; min-height: 32px; }
         if (typeof m.counted === "number") on[m.stockId] = m.counted; else on[m.stockId] += Number(m.qty) || 0;
         touched[m.stockId] = true;
       } else {
-        (e.s.lines || []).forEach(function (l) { var u = l.use || {}; for (var k in u) if (k in on) on[k] -= u[k] * l.qty; });
+        (e.s.lines || []).forEach(function (l) { var u = lineUseAbs(l); for (var k in u) if (k in on) on[k] -= u[k]; });
       }
     }
     for (var k2 in on) on[k2] = num(on[k2]);
@@ -565,6 +588,124 @@ summary { font-weight: 700; cursor: pointer; min-height: 32px; }
   var stockById = function (id) { return S.stock.filter(function (s) { return s.id === id; })[0]; };
   var stockName = function (id) { var s = stockById(id); return s ? s.name : "(removed)"; };
   function salesBetween(a, b) { return S.sales.filter(function (s) { return !s.voided && s.ts >= a && s.ts < b; }); }
+
+  /* ---------- expected sales from stock ----------
+     Expected sales for a day = every dish you stocked that day, sold at its menu price.
+     "Stocked" = what was left from yesterday (tira) + deliveries added that day.
+     A dish that uses several stock items counts only as many servings as the scarcest item allows. */
+  function stockPlan(key) {
+    var ws = dparse(key), we = dayMs(key, 1); if (isNaN(ws)) return { total: 0, items: [] };
+    var before = ledgerAt(S.events, ws - 1), stocked = {};
+    S.stock.forEach(function (st) { stocked[st.id] = before.touched[st.id] ? Math.max(0, before.on[st.id]) : 0; });
+    S.moves.forEach(function (m) { if (m.kind === "delivery" && m.ts >= ws && m.ts < we && (m.stockId in stocked)) stocked[m.stockId] += Number(m.qty) || 0; });
+    var items = [], total = 0;
+    S.menu.filter(function (m) { return m.active !== false; }).forEach(function (m) {
+      var u = m.use || {}, keys = Object.keys(u).filter(function (k) { return u[k] > 0 && (k in stocked); });
+      if (!keys.length) return;
+      var n = Infinity; keys.forEach(function (k) { n = Math.min(n, stocked[k] / u[k]); });
+      n = Math.floor(n + 1e-9); if (!(n > 0)) return;
+      items.push({ id: m.id, name: m.name, price: Number(m.price) || 0, qty: n }); total += n * (Number(m.price) || 0);
+    });
+    return { total: num(total), items: items };
+  }
+  function targetFor(key) { var c = closeRec(key); if (c && c.target > 0) return c.target; return stockPlan(key).total; }
+  function unsoldList(key, rows) {
+    var sold = {}; rows.forEach(function (sl) { (sl.lines || []).forEach(function (l) { sold[l.id] = (sold[l.id] || 0) + l.qty; }); });
+    var out = [], val = 0;
+    stockPlan(key).items.forEach(function (it) { var left = it.qty - (sold[it.id] || 0); if (left > 0) { out.push({ name: it.name, qty: left, val: left * it.price }); val += left * it.price; } });
+    out.sort(function (a, b) { return b.val - a.val; });
+    return { list: out, val: num(val) };
+  }
+  function avgOrderFor(key, rows) {
+    if (rows.length >= 3) return rows.reduce(function (a, x) { return a + x.total; }, 0) / rows.length;
+    var f = forecastFor(key); if (f && f.orders > 0) return f.sales / f.orders;
+    var all = S.sales.filter(function (x) { return !x.voided; });
+    return all.length ? all.reduce(function (a, x) { return a + x.total; }, 0) / all.length : 0;
+  }
+  function targetBlock(key, total, rows, opt) {
+    opt = opt || {};
+    var tg = opt.saved != null ? opt.saved : stockPlan(key).total;
+    if (!(tg > 0)) {
+      return '<div class="panel" style="padding:12px;margin-bottom:12px"><b>Expected sales</b><div class="s-sub" style="margin:4px 0 8px">Add stock on the Stock tab. The app then shows how much you can sell and how much more you need to reach it.</div><button class="btn small" type="button" data-act="tab" data-tab="stock">Add stock</button></div>';
+    }
+    var pct = Math.min(100, Math.round(total / tg * 100)), diff = num(tg - total), done = diff <= 0, un = unsoldList(key, rows);
+    var avg = avgOrderFor(key, rows), more = !done && avg > 0 ? Math.ceil(diff / avg) : 0;
+    var h = '<div class="panel" style="padding:12px;margin-bottom:12px"><div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px"><b>' + (opt.closed ? "Expected vs actual" : "Expected sales") + '</b><span class="s-sub">From stock: ' + money(tg) + "</span></div>" +
+      '<div class="split" style="margin:8px 0"><i class="c" style="width:' + pct + '%' + (done ? ';background:var(--ok)' : '') + '"></i></div>';
+    if (done) h += '<div><span class="chip ok">Reached ✓</span> <b>' + money(total) + '</b> <span class="s-sub">' + (diff < 0 ? money(-diff) + " over expected" : "sold all your stock") + "</span></div>";
+    else if (opt.closed) h += '<div><span class="chip bad">Not reached</span> <b>' + money(total) + '</b> <span class="s-sub">short by ' + money(diff) + " (" + pct + "%)</span></div>";
+    else h += '<div><b style="font-size:20px">' + money(diff) + '</b> <span class="s-sub">more needed to reach expected · ' + pct + '% sold' + (more ? " · about " + more + " more " + (more === 1 ? "order" : "orders") : "") + "</span></div>";
+    if (un.list.length) h += '<div class="s-sub" style="margin-top:8px"><b>' + (opt.closed ? "Unsold (tira)" : "Still to sell") + ' · ' + money(un.val) + ':</b> ' + un.list.slice(0, 8).map(function (x) { return esc(x.name) + " " + x.qty; }).join(", ") + (un.list.length > 8 ? " …" : "") + "</div>";
+    return h + "</div>";
+  }
+
+  /* ---------- expected sales (forecast) ----------
+     Looks at the same weekday over the last 8 weeks (recent weeks count more).
+     Days with no sales are skipped, so a day you were closed does not pull the number down.
+     With fewer than 2 matching days it falls back to the average of the last 28 days. */
+  function forecastFor(dateStr) {
+    var tgt = dparse(dateStr); if (isNaN(tgt)) return null;
+    var wd = new Date(tgt).getDay(), today = dparse(todayStr());
+    var from = dayMs(todayStr(), -56), days = {};
+    S.sales.forEach(function (sl) {
+      if (sl.voided || sl.ts < from) return;
+      var k = dstr(sl.ts); if (dparse(k) >= today) return;
+      var d = days[k] || (days[k] = { t: dparse(k), total: 0, orders: 0, use: {} });
+      d.total += sl.total; d.orders += 1;
+      (sl.lines || []).forEach(function (l) { var u = lineUseAbs(l); for (var q in u) d.use[q] = (d.use[q] || 0) + u[q]; });
+    });
+    var all = Object.keys(days).map(function (k) { return days[k]; });
+    var pick = all.filter(function (d) { return new Date(d.t).getDay() === wd; }), basis = "same weekday";
+    if (pick.length < 2) { pick = all.filter(function (d) { return d.t >= dayMs(todayStr(), -28); }); basis = "recent days"; }
+    if (!pick.length) return null;
+    var W = 0, sum = 0, ord = 0, use = {}, hi = 0, lo = Infinity;
+    pick.forEach(function (d) {
+      var wk = Math.floor((today - d.t) / 6048e5), w = 1 / (1 + wk * 0.25);
+      W += w; sum += d.total * w; ord += d.orders * w;
+      for (var q in d.use) use[q] = (use[q] || 0) + d.use[q] * w;
+      hi = Math.max(hi, d.total); lo = Math.min(lo, d.total);
+    });
+    for (var q2 in use) use[q2] = use[q2] / W;
+    return { sales: sum / W, orders: ord / W, use: use, n: pick.length, basis: basis, lo: lo, hi: hi, date: dateStr };
+  }
+  function forecastCard(f, label, actual) {
+    var h = '<div class="stat"><small>' + esc(label) + '</small><b>' + money(Math.round(f.sales / 5) * 5) + '</b><span>about ' + Math.max(1, Math.round(f.orders)) + ' orders</span>';
+    if (actual != null) {
+      var pct = f.sales > 0 ? Math.min(100, Math.round(actual / f.sales * 100)) : 0;
+      h += '<div class="split"><i class="c" style="width:' + pct + '%"></i></div><span>' + money(actual) + ' so far · ' + pct + '%' + (actual > f.sales ? ' (beat it!)' : '') + '</span>';
+    } else h += '<br><span>usually ' + money(f.lo) + ' to ' + money(f.hi) + '</span>';
+    return h + '</div>';
+  }
+  function prepList(f, soldToday) {
+    var need = {}, k;
+    for (k in f.use) need[k] = Math.max(0, f.use[k] - ((soldToday && soldToday[k]) || 0));
+    var rows = Object.keys(need).filter(function (k2) { return stockById(k2) && need[k2] >= 0.5; })
+      .sort(function (a, b) { return need[b] - need[a]; }).slice(0, 12);
+    if (!rows.length) return "";
+    return '<div class="panel rank" style="margin-top:10px">' + rows.map(function (k2) {
+      var st = stockById(k2), exp = Math.ceil(need[k2] - 1e-9), have = Math.max(0, S.derived.touched[k2] ? S.derived.onHand[k2] : 0);
+      var add = Math.max(0, exp - have), chip = add > 0 ? '<span class="chip bad">add ' + qf(add) + '</span>' : '<span class="chip ok">enough</span>';
+      return '<div class="r"><span class="r-name">' + esc(st.name) + '</span><span class="r-val">need ~' + exp + ' · have ' + qf(have) + ' ' + chip + '</span></div>';
+    }).join("") + '</div>';
+  }
+  function forecastPanel() {
+    var t = todayStr(), tm = dstr(dayMs(t, 1)), fT = forecastFor(t), fM = forecastFor(tm);
+    if (!fT && !fM) return '<h2 class="sec">Expected sales</h2><div class="panel"><div class="empty"><b>Not enough sales yet</b>After a few days of sales, the app will predict your sales for today and tomorrow.</div></div>';
+    var soldNow = salesBetween(dparse(t), dayMs(t, 1)), actual = soldNow.reduce(function (a, x) { return a + x.total; }, 0), used = {};
+    soldNow.forEach(function (sl) { (sl.lines || []).forEach(function (l) { var u = lineUseAbs(l); for (var q in u) used[q] = (used[q] || 0) + u[q]; }); });
+    var h = '<h2 class="sec">Expected sales</h2><div class="stats">';
+    if (fT) h += forecastCard(fT, "Today", actual);
+    if (fM) h += forecastCard(fM, new Date(dparse(tm)).toLocaleDateString("en-PH", { weekday: "long" }), null);
+    h += '</div>';
+    var f = fT || fM;
+    h += '<p style="color:var(--muted);font-size:13px;margin:8px 2px 0">Based on ' + f.n + ' ' + (f.basis === "same weekday" ? "past " + new Date(dparse(f.date)).toLocaleDateString("en-PH", { weekday: "long" }) + "s" : "recent days") + '. A guess, not a promise. It gets better with more days of sales.</p>';
+    if (fT) { var pl = prepList(fT, used); if (pl) h += '<h2 class="sec">Prep for the rest of today</h2>' + pl; }
+    if (fM) { var pm = prepList(fM, null); if (pm) h += '<h2 class="sec">Prep for ' + esc(new Date(dparse(tm)).toLocaleDateString("en-PH", { weekday: "long" })) + '</h2>' + pm + '<p style="color:var(--muted);font-size:13px;margin:8px 2px 0">“Have” is what is on hand now. Count Tira at closing for the best result.</p>'; }
+    var wk = [], i, ff, mx = 0;
+    for (i = 1; i <= 7; i++) { ff = forecastFor(dstr(dayMs(t, i))); var v = ff ? ff.sales : 0; mx = Math.max(mx, v); wk.push({ l: new Date(dayMs(t, i)).toLocaleDateString("en-PH", { weekday: "short" }), v: v, t: dlabel(dayMs(t, i)) + ": " + money(v) }); }
+    if (mx > 0) h += '<h2 class="sec">Next 7 days (expected)</h2><div class="panel chartbox">' + bars(wk, 1, true) + '</div>';
+    return h;
+  }
   function cartShort(lines) {
     if (backdated()) return [];
     var need = {}, out = [];
@@ -608,6 +749,12 @@ summary { font-weight: 700; cursor: pointer; min-height: 32px; }
     var t = salesBetween(ws, we);
     $("#todayTotal").textContent = money(t.reduce(function (a, s) { return a + s.total; }, 0));
     $("#todayOrders").textContent = t.length + (t.length === 1 ? " order" : " orders");
+    var fx = forecastFor(dstr(ws)), ex = $("#todayExp"), tgH = stockPlan(dstr(ws)).total, totH = t.reduce(function (a, s) { return a + s.total; }, 0);
+    if (ex) {
+      ex.hidden = !(tgH || fx);
+      if (tgH) ex.textContent = totH >= tgH ? "Expected reached ✓" : "Need " + money(tgH - totH) + " to reach " + money(tgH);
+      else if (fx) ex.textContent = "Expected " + money(Math.round(fx.sales / 5) * 5);
+    }
     var attn = S.stock.filter(function (s) { var st = status(s); return st === "low" || st === "out"; }).length;
     var cdot = $("#closeDot"); if (cdot) cdot.hidden = !isClosedDay(dstr(ws));
     var dot = $("#lowDot"); dot.hidden = !attn; dot.textContent = attn;
@@ -628,6 +775,211 @@ summary { font-weight: 700; cursor: pointer; min-height: 32px; }
   var allLoaded = function () { var l = S.loaded; return l.menu && l.stock && l.sales && l.moves && l.closes; };
 
 /* ---------- SELL ---------- */
+  /* ---------- payments, utang, expenses ---------- */
+  function isCashPay(x) { return x.pay !== "gcash" && x.pay !== "utang"; }
+  function sumPay(rows, kind) { return num(rows.filter(function (x) { return kind === "cash" ? isCashPay(x) : x.pay === kind; }).reduce(function (a, x) { return a + x.total; }, 0)); }
+  function payLabel(x) { return x.pay === "gcash" ? "GCash" : x.pay === "utang" ? "Utang" + (x.who ? " · " + x.who : "") : "Cash"; }
+  function wkey(n) { return String(n || "").trim().toLowerCase(); }
+  function utangBook() {
+    var map = {};
+    function get(who) { var k = wkey(who); return map[k] || (map[k] = { who: String(who).trim(), owed: 0, paid: 0, last: 0, sales: [], pays: [] }); }
+    S.sales.forEach(function (x) { if (x.voided || x.pay !== "utang" || !wkey(x.who)) return; var c = get(x.who); c.owed += x.total; c.sales.push(x); c.last = Math.max(c.last, x.ts); });
+    S.credits.forEach(function (x) { if (!wkey(x.who)) return; var c = get(x.who); c.paid += x.amount; c.pays.push(x); c.last = Math.max(c.last, x.ts); });
+    return Object.keys(map).map(function (k) { var c = map[k]; c.bal = num(c.owed - c.paid); return c; }).sort(function (a, b) { return b.bal - a.bal || b.last - a.last; });
+  }
+  function dayExpenses(key) { var a = dparse(key), b = dayMs(key, 1); return num(S.expenses.filter(function (e) { return e.ts >= a && e.ts < b; }).reduce(function (t, e) { return t + e.amount; }, 0)); }
+  function dayCollected(key) { var a = dparse(key), b = dayMs(key, 1); return num(S.credits.filter(function (e) { return e.ts >= a && e.ts < b; }).reduce(function (t, e) { return t + e.amount; }, 0)); }
+
+  function renderMoney() {
+    var key = dstr(workStart()), ws = dparse(key), we = dayMs(key, 1);
+    var book = utangBook(), owing = book.filter(function (c) { return c.bal > 0.005; }), totalOwed = num(owing.reduce(function (a, c) { return a + c.bal; }, 0));
+    var dayEx = S.expenses.filter(function (e) { return e.ts >= ws && e.ts < we; }).sort(function (a, b) { return b.ts - a.ts; });
+    var exTotal = dayExpenses(key), week = num(S.expenses.filter(function (e) { return e.ts >= dayMs(key, -6) && e.ts < we; }).reduce(function (t, e) { return t + e.amount; }, 0));
+    var h = '<p><button class="btn" type="button" data-act="open-calc">Open calculator</button></p><h2 class="sec">Utang</h2><div class="stats"><div class="stat"><small>Total utang</small><b>' + money(totalOwed) + '</b><span>' + owing.length + (owing.length === 1 ? " customer" : " customers") + '</span></div><div class="stat"><small>Paid today</small><b>' + money(dayCollected(key)) + '</b><span>Utang collected</span></div></div>';
+    if (!owing.length) h += '<div class="panel" style="margin-top:10px"><div class="empty"><b>No utang</b>When a customer pays later, choose <b>Utang</b> when you record the sale and type their name.</div></div>';
+    else h += '<ul class="list" style="margin-top:10px">' + owing.map(function (c) {
+      return '<li><div class="sale"><div><b>' + esc(c.who) + '</b><div class="s-items">Last: ' + esc(dlabel(c.last)) + '</div></div><div class="s-total">' + money(c.bal) + '</div></div><div class="s-acts"><button class="btn small primary" type="button" data-act="open-utang" data-who="' + esc(c.who) + '">Details / Receive payment</button></div></li>';
+    }).join("") + "</ul>";
+    h += '<h2 class="sec">Expenses · ' + esc(dlabel(ws)) + '</h2><div class="stats"><div class="stat"><small>Spent today</small><b>' + money(exTotal) + '</b><span>' + dayEx.length + (dayEx.length === 1 ? " entry" : " entries") + '</span></div><div class="stat"><small>Last 7 days</small><b>' + money(week) + '</b><span>Total expenses</span></div></div>';
+    if (S.canWrite) h += '<div class="quick" style="margin-top:10px"><button class="btn small primary" type="button" data-act="open-expense" data-label="Ice">+ Ice</button><button class="btn small" type="button" data-act="open-expense" data-label="Gas">+ Gas</button><button class="btn small" type="button" data-act="open-expense" data-label="">+ Other</button></div>';
+    if (dayEx.length) h += '<ul class="list" style="margin-top:10px">' + dayEx.map(function (e) {
+      var armed = S.expArm === e.id;
+      return '<li><div class="sale"><div><b>' + esc(e.label) + '</b><div class="s-items">' + esc(timeStr(e.ts)) + '</div></div><div class="s-total">' + money(e.amount) + '</div></div>' + (S.canWrite ? '<div class="s-acts"><button class="btn small' + (armed ? " primary" : "") + '" type="button" data-act="del-exp" data-id="' + esc(e.id) + '">' + (armed ? "Tap again to delete" : "Delete") + "</button></div>" : "") + "</li>";
+    }).join("") + "</ul>";
+    return h;
+  }
+  function expenseSheet(label) {
+    S.sheet = { type: "expense" };
+    openSheet('<h2>Add expense</h2><p class="lead">Money you spent for the shop today.</p>' +
+      '<div class="quick"><button type="button" class="btn small" data-act="exp-label" data-label="Ice">Ice</button><button type="button" class="btn small" data-act="exp-label" data-label="Gas">Gas</button></div>' +
+      '<label class="field"><span>What for</span><input id="expLabel" value="' + esc(label) + '" placeholder="e.g. Ice, gas, plastic"></label>' +
+      '<label class="field"><span>Amount (₱)</span><input id="expAmt" inputmode="decimal" placeholder="0"></label>' +
+      '<div class="actions"><button class="btn" data-act="close" type="button">Cancel</button><button class="btn primary" data-act="save-expense" type="button">Save expense</button></div>');
+  }
+  function saveExpense() {
+    if (!guardWrite()) return;
+    var label = $("#expLabel").value.trim() || "Expense", amt = parseNum($("#expAmt").value);
+    if (!(amt > 0)) { toast("Type how much you spent.", true); return; }
+    S.db.collection("expenses").add({ ts: stamp(), at: Date.now(), label: label, amount: num(amt) }).catch(fail);
+    closeSheet(); toast("Expense saved · " + money(amt));
+  }
+  function delExpense(id) {
+    if (!guardWrite()) return;
+    if (S.expArm !== id) { S.expArm = id; renderAll(); return; }
+    S.expArm = null; S.db.doc("expenses/" + id).delete().catch(fail); toast("Expense deleted");
+  }
+  function utangSheet(who) {
+    var c = utangBook().filter(function (x) { return wkey(x.who) === wkey(who); })[0]; if (!c) return;
+    S.sheet = { type: "utang", who: c.who };
+    var hist = c.sales.map(function (x) { return { ts: x.ts, txt: (x.lines || []).map(function (l) { return l.qty + " " + l.name; }).join(", "), amt: x.total, pay: false }; })
+      .concat(c.pays.map(function (x) { return { ts: x.ts, txt: "Payment received", amt: -x.amount, pay: true }; }))
+      .sort(function (a, b) { return b.ts - a.ts; }).slice(0, 15);
+    openSheet('<h2>' + esc(c.who) + '</h2><p class="lead">Still owes <b>' + money(c.bal) + '</b></p>' +
+      '<ul class="list">' + hist.map(function (x) { return '<li><div class="sale"><div><b>' + esc(dlabel(x.ts)) + '</b> ' + (x.pay ? '<span class="chip ok">Paid</span>' : '<span class="chip">Utang</span>') + '<div class="s-items">' + esc(x.txt) + '</div></div><div class="s-total">' + (x.amt < 0 ? "−" + money(-x.amt) : money(x.amt)) + "</div></div></li>"; }).join("") + "</ul>" +
+      (c.bal > 0.005 && S.canWrite ? '<label class="field" style="margin-top:12px"><span>Payment received (₱)</span><input id="payAmt" inputmode="decimal" placeholder="0"></label><div class="quick"><button type="button" class="btn small" data-act="pay-full" data-v="' + c.bal + '">Pay in full ' + money(c.bal) + '</button></div>' +
+        '<div class="actions"><button class="btn" data-act="close" type="button">Close</button><button class="btn primary" data-act="save-pay" type="button">Record payment</button></div>' : '<div class="actions"><button class="btn" data-act="close" type="button">Close</button></div>'));
+  }
+  function saveUtangPay() {
+    if (!guardWrite()) return;
+    var who = S.sheet && S.sheet.who, amt = parseNum($("#payAmt").value);
+    var c = utangBook().filter(function (x) { return wkey(x.who) === wkey(who); })[0]; if (!c) return;
+    if (!(amt > 0)) { toast("Type the amount received.", true); return; }
+    if (amt > c.bal + 0.005) { toast("That is more than the " + money(c.bal) + " owed.", true); return; }
+    S.db.collection("credits").add({ ts: stamp(), at: Date.now(), who: c.who, amount: num(amt) }).catch(fail);
+    closeSheet(); toast("Payment saved · " + money(amt));
+  }
+
+  /* ---------- calculator ---------- */
+  var CALC_OPS = "+−×÷";
+  S.calc = { expr: "", done: false, prev: "", hist: [] };
+  function calcFmt(n) {
+    if (!isFinite(n)) return "Error";
+    var r = Math.round(n * 1e10) / 1e10;
+    return r.toLocaleString("en-PH", { maximumFractionDigits: 10 });
+  }
+  function calcEval(src) {
+    // returns a number, or null for an empty expression, or throws "div0" / "bad"
+    var e = src.replace(/[+−×÷]+$/, "");
+    if (!e) return null;
+    var toks = e.match(/\d+\.?\d*|\.\d+|[+−×÷%]/g) || [], i = 0;
+    if (toks.join("") !== e) throw "bad";
+    function num_() {
+      var t = toks[i];
+      if (t === undefined || !/^[\d.]/.test(t)) throw "bad";
+      i++; var v = parseFloat(t), pct = false;
+      while (toks[i] === "%") { v = v / 100; i++; pct = true; }
+      return { v: v, pct: pct };
+    }
+    function factor() { var t = toks[i]; if (t === "−") { i++; var f = factor(); return { v: -f.v, pct: f.pct }; } var r = num_(); return typeof r === "number" ? { v: r, pct: false } : r; }
+    function term() {
+      var a = factor(), n = 1;
+      while (toks[i] === "×" || toks[i] === "÷") {
+        var op = toks[i++], b = factor(); n++;
+        if (op === "÷") { if (b.v === 0) throw "div0"; a = { v: a.v / b.v, pct: false }; } else a = { v: a.v * b.v, pct: false };
+      }
+      return { v: a.v, pct: a.pct && n === 1 };
+    }
+    var left = term();
+    while (toks[i] === "+" || toks[i] === "−") {
+      var o = toks[i++], r = term(), rv = r.pct ? left.v * r.v : r.v;
+      left = { v: o === "+" ? left.v + rv : left.v - rv, pct: false };
+    }
+    if (i < toks.length) throw "bad";
+    return left.v;
+  }
+  function calcShow(x) { return String(x).replace(/([+−×÷])/g, " $1 "); }
+  function calcPress(k) {
+    var c = S.calc, last = c.expr.slice(-1), isOp = CALC_OPS.indexOf(last) >= 0 && last !== "";
+    if (k === "C") { c.expr = ""; c.done = false; c.prev = ""; }
+    else if (k === "⌫") { if (c.done) { c.expr = ""; c.done = false; c.prev = ""; } else c.expr = c.expr.slice(0, -1); }
+    else if (k === "=") {
+      if (!c.expr) return calcRender();
+      try {
+        var v = calcEval(c.expr);
+        if (v === null) return calcRender();
+        var out = String(Math.round(v * 1e10) / 1e10);
+        if (!isFinite(Number(out)) || /e/i.test(out)) throw "bad";
+        c.hist.unshift({ e: c.expr, r: out }); c.hist = c.hist.slice(0, 5);
+        c.prev = c.expr; c.expr = out; c.done = true;
+      } catch (err) { c.err = err === "div0" ? "Can’t divide by 0" : "Check the numbers"; return calcRender(); }
+    }
+    else if (/^\d$/.test(k)) {
+      if (c.done) { c.expr = ""; c.done = false; c.prev = ""; }
+      var m = c.expr.match(/[\d.]*$/)[0];
+      if (last === "%") return calcRender();
+      if (m.replace(".", "").length >= 15) return calcRender();
+      if (m === "0" && k === "0") return calcRender();
+      if (m === "0" && k !== "0") c.expr = c.expr.slice(0, -1);
+      c.expr += k;
+    }
+    else if (k === ".") {
+      if (c.done) { c.expr = ""; c.done = false; c.prev = ""; }
+      var m2 = c.expr.match(/[\d.]*$/)[0];
+      if (last === "%") return calcRender();
+      if (m2.indexOf(".") >= 0) return calcRender();
+      c.expr += m2 === "" ? "0." : ".";
+    }
+    else if (CALC_OPS.indexOf(k) >= 0) {
+      if (c.done) { c.done = false; c.prev = ""; }
+      if (!c.expr) { if (k === "−") c.expr = "−"; }
+      else if (c.expr === "−") { /* nothing to do yet */ }
+      else if (isOp) {
+        if (k === "−" && (last === "×" || last === "÷")) c.expr += "−";
+        else { var base = c.expr.replace(/[+−×÷]+$/, ""); if (base) c.expr = base + k; }
+      } else c.expr += k;
+    }
+    else if (k === "%") {
+      if (c.done) c.done = false;
+      if (/[\d]$/.test(c.expr) || last === "%") c.expr += "%";
+    }
+    c.err = "";
+    calcRender();
+  }
+  function calcRender() {
+    var c = S.calc, ex = $("#calcExpr"), rs = $("#calcRes"), hs = $("#calcHist"); if (!ex || !rs) return;
+    ex.textContent = c.done ? calcShow(c.prev) + " =" : "";
+    var main = c.expr, txt, isErr = false;
+    if (c.err) { txt = c.err; isErr = true; }
+    else if (c.done) txt = calcFmt(parseFloat(c.expr));
+    else {
+      txt = main ? calcShow(main) : "0";
+      try { var live = calcEval(main); if (live !== null && /[+−×÷%]/.test(main.replace(/^−/, ""))) ex.textContent = "= " + calcFmt(live); } catch (e) {}
+    }
+    rs.textContent = txt; rs.className = "calc-res" + (isErr ? " err" : "");
+    if (hs) hs.innerHTML = c.hist.map(function (h, i) { return '<li><button type="button" data-act="calc-use" data-i="' + i + '">' + esc(calcShow(h.e)) + ' = <b>' + esc(calcFmt(parseFloat(h.r))) + "</b></button></li>"; }).join("");
+  }
+  function calcSheet() {
+    S.sheet = { type: "calc" };
+    var keys = [["C", "fn"], ["⌫", "fn"], ["%", "fn"], ["÷", "op"], ["7"], ["8"], ["9"], ["×", "op"], ["4"], ["5"], ["6"], ["−", "op"], ["1"], ["2"], ["3"], ["+", "op"], ["0"], ["."], ["=", "eq"]];
+    var grid = keys.map(function (k) { return '<button type="button" data-act="calc" data-k="' + k[0] + '" class="' + (k[1] || "") + '" aria-label="' + ({ "⌫": "Backspace", "÷": "Divide", "×": "Multiply", "−": "Minus", "+": "Plus", "=": "Equals", C: "Clear", "%": "Percent", ".": "Point" }[k[0]] || k[0]) + '">' + k[0] + "</button>"; }).join("");
+    // layout: 0 spans two columns on the last row, with . and = beside it
+    openSheet('<h2>Calculator</h2><div class="calc-disp"><div class="calc-expr" id="calcExpr"></div><div class="calc-res" id="calcRes">0</div></div><div class="calc-grid" id="calcGrid">' + grid + '</div><ul class="calc-hist" id="calcHist"></ul><p class="s-sub" style="margin:10px 0 0">Tip: 200 + 10% gives 220. Tap a past answer to use it again.</p><div class="actions"><button class="btn" data-act="close" type="button">Close</button></div>');
+    var zero = $('#calcGrid [data-k="0"]'); if (zero) zero.style.gridColumn = "span 2";
+    calcRender();
+  }
+
+  /* ---------- egg (auto) and rice (cost only) ---------- */
+  function eggStock() { return S.stock.filter(function (x) { return /^egg/i.test(x.name); })[0] || null; }
+  function mEgg(m) { return m.cat !== "Extras" && (m.egg !== undefined ? !!m.egg : true); }
+  function mRice(m) { return m.cat !== "Extras" && (m.rice !== undefined ? !!m.rice : true); }
+  function lineUseAbs(l) {
+    var o = {}, u = l.use || {}, x = l.xu || {}, k;
+    for (k in u) o[k] = u[k] * l.qty;
+    for (k in x) o[k] = (o[k] || 0) + x[k];
+    return o;
+  }
+  function lineCost(l) { return (l.cost || 0) * l.qty + (l.xc || 0); }
+  function dishCost(m) {
+    var c = 0, u = m.use || {}, k, eg = eggStock();
+    for (k in u) { var st = stockById(k); if (st) c += u[k] * (Number(st.cost) || 0); }
+    if (eg && mEgg(m) && !(m.use && m.use[eg.id])) c += Number(eg.cost) || 0;
+    if (mRice(m)) c += S.riceCost || 0;
+    return c;
+  }
+  function profitStat(rows, total) {
+    var cost = 0; rows.forEach(function (sl) { (sl.lines || []).forEach(function (l) { cost += lineCost(l); }); });
+    return { cost: num(cost), profit: num(total - cost), has: cost > 0 };
+  }
   function cartLines() {
     var lines = [];
     S.menu.slice().sort(byOrder).forEach(function (m) {
@@ -636,7 +988,13 @@ summary { font-weight: 700; cursor: pointer; min-height: 32px; }
       for (var k in use) { var st = stockById(k); if (st) cost += use[k] * (Number(st.cost) || 0); }
       var mo = S.mods[m.id] || {}, nr = m.cat === "Extras" ? 0 : Math.min(mo.nr || 0, q), ne = m.cat === "Extras" ? 0 : Math.min(mo.ne || 0, q);
       var pr = Number(m.price) || 0, off = Math.min(nr * (S.offR || 0) + ne * (S.offE || 0), pr * q);
-      lines.push({ id: m.id, name: m.name, price: pr, qty: q, cost: num(cost), use: use, off: num(off), nr: nr, ne: ne, extra: m.cat === "Extras" });
+      var xu = {}, xc = 0, eg = eggStock();
+      if (eg && mEgg(m) && !(use[eg.id] > 0) && q - ne > 0) { xu[eg.id] = q - ne; xc += (q - ne) * (Number(eg.cost) || 0); }
+      if (mRice(m) && (q - nr) > 0) xc += (q - nr) * (S.riceCost || 0);
+      var ln = { id: m.id, name: m.name, price: pr, qty: q, cost: num(cost), use: use, off: num(off), nr: nr, ne: ne, extra: m.cat === "Extras" };
+      if (Object.keys(xu).length) ln.xu = xu;
+      if (xc > 0) ln.xc = num(xc);
+      lines.push(ln);
     });
     return lines;
   }
@@ -650,6 +1008,7 @@ summary { font-weight: 700; cursor: pointer; min-height: 32px; }
     var items = S.menu.filter(function (m) { return m.active !== false; }).sort(byOrder);
     if (!items.length) return '<div class="empty"><b>No menu items yet</b>' + (S.admin ? 'Add your dishes on the Menu tab.' : 'The owner needs to add the menu first.') + '</div>';
     var h = "", untouched = S.stock.filter(function (s) { return !S.derived.touched[s.id]; }).length;
+    (function () { var k = dstr(workStart()), r = salesBetween(workStart(), dayMs(k, 1)); h += targetBlock(k, r.reduce(function (a, x) { return a + x.total; }, 0), r, { closed: false }); })();
     if (isClosedDay(dstr(workStart()))) h += '<div class="note">The shop is closed. <button class="btn small" data-act="reopen" type="button">Reopen shop</button></div>';
     if (S.stock.length && untouched === S.stock.length) h += '<div class="note info">No stock entered yet, so nothing can be sold. Add stock first. <button class="btn small" data-act="tab" data-tab="stock" type="button">Add stock</button></div>';
     var groups = [], seen = {};
@@ -707,7 +1066,11 @@ summary { font-weight: 700; cursor: pointer; min-height: 32px; }
     h += '<label class="field"><span>Discount (₱) <span class="hint">(optional, for senior, PWD or regulars)</span></span><input id="discIn" inputmode="decimal" placeholder="0" value="' + (S.disc || "") + '"></label>';
     h += '<div class="quick"><button type="button" class="btn small" data-act="disc-pct" data-v="20">20% off</button><button type="button" class="btn small" data-act="disc-pct" data-v="0">No discount</button></div>';
     h += '<div class="totalline"><span>Total</span><b id="sheetTotal">' + money(total) + "</b></div>";
-    h += '<div class="seg" role="group" aria-label="Payment"><button type="button" data-act="pay" data-pay="cash" aria-pressed="' + (S.pay === "cash") + '">Cash</button><button type="button" data-act="pay" data-pay="gcash" aria-pressed="' + (S.pay === "gcash") + '">GCash</button></div>';
+    h += '<div class="seg" role="group" aria-label="Payment"><button type="button" data-act="pay" data-pay="cash" aria-pressed="' + (S.pay === "cash") + '">Cash</button><button type="button" data-act="pay" data-pay="gcash" aria-pressed="' + (S.pay === "gcash") + '">GCash</button><button type="button" data-act="pay" data-pay="utang" aria-pressed="' + (S.pay === "utang") + '">Utang</button></div>';
+    if (S.pay === "utang") {
+      var names = utangBook().map(function (c) { return '<option value="' + esc(c.who) + '">'; }).join("");
+      h += '<label class="field"><span>Customer name <span class="hint">(who will pay later)</span></span><input id="whoIn" list="whoList" autocomplete="off" placeholder="e.g. Aling Nena" value="' + esc(S.who || "") + '"></label><datalist id="whoList">' + names + '</datalist>';
+    }
     if (S.pay === "cash") {
       h += '<label class="field"><span>Cash received <span class="hint">(optional, to work out change)</span></span><input id="cashIn" inputmode="decimal" placeholder="0" value="' + (S.cash || "") + '"></label>';
       var opts = [100, 200, 500, 1000];
@@ -731,14 +1094,16 @@ summary { font-weight: 700; cursor: pointer; min-height: 32px; }
   function charge() {
     if (!guardWrite()) return;
     if (isClosedDay(dstr(stamp()))) { toast("The shop is closed. Reopen it on the Close tab first.", true); return; }
+    if (S.pay === "utang" && !wkey(S.who)) { toast("Type the customer’s name for utang.", true); return; }
     var lackC = cartShort(cartLines()); if (lackC.length) { toast("Not enough stock: " + lackC.join("; "), true); return; }
     var lines = cartLines(); if (!lines.length) return;
     var disc = num(cartDisc()), total = cartTotal();
     var rec = { ts: stamp(), at: Date.now(), lines: lines, total: total, pay: S.pay, voided: false };
     if (disc > 0) rec.discount = disc;
+    if (S.pay === "utang") rec.who = String(S.who).trim();
     if (S.pay === "cash" && S.cash > 0) rec.tendered = S.cash;
     var p = S.db.collection("sales").add(rec);
-    S.cart = {}; S.mods = {}; S.cash = 0; S.disc = 0; closeSheet();
+    S.cart = {}; S.mods = {}; S.cash = 0; S.disc = 0; S.who = ""; if (S.pay === "utang") S.pay = "cash"; closeSheet();
     toast("Sale recorded" + (backdated() ? " for " + dlabel(rec.ts) : "") + " · " + money(total));
     renderAll();
     p.catch(function () { toast("That sale did not save. Please enter it again.", true); });
@@ -851,12 +1216,41 @@ summary { font-weight: 700; cursor: pointer; min-height: 32px; }
   }
 
 /* ---------- MENU ---------- */
+
+  function manualHtml() {
+    var M = [
+      ["1. Taking an order", ["Go to the <b>Sell</b> tab.", "Tap the dish once for each order. Tap it again to add another one. The red number on the dish shows how many are in the order.", "Added too many? Tap the red <b>−</b> button on the dish to remove one.", "Tap <b>Review order</b> at the bottom of the screen.", "<b>Every meal comes with 1 egg and 1 rice.</b> The egg is taken off your Egg stock automatically for each order. The rice is not counted in stock, but its cost is counted in your profit (see 15)."]],
+      ["Calculator", ["Tap the <b>calculator button</b> at the top of the screen, next to the date. It works on every tab.", "You can also open it from the <b>Money</b> tab.", "Type numbers and tap + − × ÷. Tap <b>=</b> for the answer. <b>⌫</b> removes the last digit and <b>C</b> clears everything.", "<b>%</b>: 200 + 10% gives 220, and 200 − 10% gives 180. 50% alone gives 0.5.", "Your last 5 answers show below. Tap one to use it again. The calculator does not change your sales or stock."]],
+      ["2. Getting paid", ["Choose <b>Cash</b>, <b>GCash</b> or <b>Utang</b> (pay later, see 9).", "For cash, type the money received, or tap <b>Exact</b>, <b>100</b>, <b>200</b>, <b>500</b> or <b>1000</b>. The screen shows the <b>change</b> to give back.", "Senior, PWD or suki discount? Type the discount in pesos, or tap <b>20% off</b>.", "Tap <b>Record sale</b>. Do this for every order, or the day’s total will be wrong."]],
+      ["3. No rice or no egg", ["Tap <b>Review order</b>. Under the dish you will see <b>No rice</b> and <b>No egg</b> with a − and + button.", "Tap <b>+</b> once for each order that has no rice (or no egg). The price goes down by ₱10 each, so Hotsilog ₱65 with no rice becomes ₱55.", "A <b>No egg</b> order does not take an egg off your stock, and a <b>No rice</b> order does not count the rice cost.", "To change the ₱10, go to the <b>Menu</b> tab and edit <b>No rice / no egg price off</b>."]],
+      ["4. A wrong order (Void)", ["Go to <b>Reports</b> and scroll down to <b>Orders</b>.", "Find the order and tap <b>Void</b>. Tap it a second time to confirm. The sale is crossed out, the stock goes back, and if it was utang the customer no longer owes it."]],
+      ["5. Morning: put in stock", ["Go to the <b>Stock</b> tab.", "Find the item and tap <b>+ Stock</b>.", "Type how many you will sell today and tap <b>Save stock</b>.", "Do this for every item you will sell, <b>and for Egg</b> (one egg for every meal). Items with no stock yet show a dash."]],
+      ["6. Expected sales (from your stock)", ["After you put in stock, the top of the <b>Sell</b> tab shows <b>Expected sales</b>: how much you will earn if you sell everything you stocked at menu price.", "It also shows <b>how much more you need</b> to reach it, about how many more orders, and a list of what is <b>still to sell</b>.", "The header also shows “Need ₱… to reach ₱…”. When you reach it, it says <b>Expected reached ✓</b>.", "At closing, the <b>Close</b> tab shows <b>Reached</b> or <b>Not reached</b>, how much you were short, and the unsold dishes (tira).", "In <b>Reports</b>, <b>Expected sales</b> also shows a guess for today, tomorrow and the next 7 days from your past sales, and what to prepare."]],
+      ["7. During the day: Sira (waste)", ["Something spoiled, dropped or thrown away? Go to <b>Stock</b>.", "Tap <b>− Sira (waste)</b> on that item, type how many, and save. Add a note if you like."]],
+      ["8. Expenses (ice and others)", ["Go to the <b>Money</b> tab, then <b>Expenses</b>.", "Tap <b>+ Ice</b> (or <b>+ Gas</b>, <b>+ Other</b>), type how much you spent, and tap <b>Save expense</b>.", "Wrong entry? Tap <b>Delete</b> twice on it.", "Your expenses show on the <b>Close</b> tab and in <b>Reports</b>, and are subtracted to show your take-home profit."]],
+      ["9. Utang (pay later)", ["When a customer will pay later, tap <b>Review order</b>, choose <b>Utang</b>, and type the customer’s name. Names you used before appear as you type. Tap <b>Record sale</b>.", "Go to the <b>Money</b> tab to see everyone who owes you and how much.", "When they pay, tap <b>Details / Receive payment</b> on their name, type the amount (or tap <b>Pay in full</b>), and tap <b>Record payment</b>. Part payments are fine.", "Utang is counted as a sale, but not as cash. The <b>Close</b> tab shows it separately so your cash count matches."]],
+      ["10. Closing time: Tira (remaining)", ["Count what is left of each item.", "On the <b>Stock</b> tab, tap <b>Tira (remaining)</b>, type the number you counted, and save.", "The app sets the stock to exactly what you counted, so it fixes any difference."]],
+      ["11. Closing the shop", ["Go to the <b>Close</b> tab. The summary is automatic: sales, cash, GCash and utang, <b>profit</b>, <b>cash on hand</b>, expected vs actual, best sellers, and for each item how many were stocked, sold, sira and what is left (tira).", "Under <b>Closing</b>, count what is really left and fix any number that is different. Leave blank to skip.", "Tap <b>Close shop</b>, then tap again to confirm. The tira counts are saved and the shop shows as closed.", "Opened by mistake or need to sell more? Tap <b>Reopen shop</b>."]],
+      ["12. Low and out of stock", ["A dish with 5 or fewer left shows <b>left</b> on the Sell screen. A dish at 0 shows <b>Out</b>, and a dish with nothing entered shows <b>No stock</b>.", "You cannot sell a dish that is Out or has no stock. Add stock on the Stock tab first. A red number on the Stock tab means items are low or out.", "Egg never blocks a sale. If the egg runs out, the app still lets you sell, so remember to add Egg stock."]],
+      ["13. Seeing the sales", ["Go to <b>Reports</b>. Pick Today, Yesterday, 7 days, 30 days or Custom.", "You will see total sales, profit, cash vs GCash, utang, expenses, best sellers, and <b>Day by day</b> with the sales, expenses, sira and tira for each day.", "<b>Download these sales (CSV)</b> saves the sales as a file you can open in Excel."]],
+      ["14. Entered a day late?", ["Tap the <b>date</b> under the shop name at the top.", "Pick the day you missed and tap <b>Use this date</b>. The date turns red while you are recording for another day.", "Everything you enter (sales, stock, expenses, utang payments) is dated that day. Tap <b>Back to today</b> when you are done."]],
+      ["15. Profit and costing", ["On the <b>Stock</b> tab, open an item’s settings and type its <b>cost per unit</b> (what you pay for one tapsilog, one egg, one styro).", "On the <b>Menu</b> tab, type your <b>Rice cost per serving</b>. Rice is not counted in stock because you serve it in a container, so this is only for profit.", "Each dish on the Menu tab then shows its <b>Cost</b> and <b>Profit</b>.", "The <b>Close</b> tab and <b>Reports</b> show your estimated profit, and your take-home after expenses."]],
+      ["16. Mistake in stock?", ["On the <b>Stock</b> tab, scroll to <b>Recent changes</b> and tap <b>Undo</b> twice on the wrong entry.", "Or just do a new <b>Tira (remaining)</b> count to correct the number."]],
+      ["17. Changing a price, egg or rice on a dish", ["Go to the <b>Menu</b> tab and tap the dish.", "Change the price, or untick <b>Show on the Sell screen</b> to hide it.", "<b>Comes with 1 egg</b> and <b>Comes with rice</b> are ticked for every meal. Untick them for a dish that has no egg or no rice. Extras (Rice, Egg, Styro) do not have these.", "Tap <b>Save item</b>."]],
+      ["18. Important", ["All your data is saved <b>on this phone only</b>. Do not clear the browser’s data or history.", "Tap <b>Back up data</b> (Menu tab) every few days, and keep the file safe. It includes your utang and expenses.", "To use another phone, open the link there and tap <b>Restore data</b> with your backup file.", "<b>Delete test sales and stock history</b> erases all sales, stock, expenses and utang payments. Only use it before you start for real."]]
+    ];
+    return '<style>.man{margin:6px 0 4px;padding-left:20px}.man li{margin:6px 0}</style><h2 class="sec">How to use this app</h2><div class="panel"><ul class="list">' + M.map(function (x) {
+      return '<li><details><summary class="dsum"><span><b style="margin:0;font-size:16px">' + x[0] + '</b></span></summary><div class="dbody"><ol class="man">' + x[1].map(function (t) { return "<li>" + t + "</li>"; }).join("") + "</ol></div></details></li>";
+    }).join("") + "</ul></div>";
+  }
+
   function renderMenu() {
     if (!allLoaded()) return '<div class="empty"><b>Loading menu…</b></div>';
     var items = S.menu.slice().sort(byOrder);
     var h = S.admin ? '<p><button class="btn primary" data-act="new-menu" type="button">Add menu item</button></p>' : '<div class="note info">Prices and recipes are set by the owner.</div>';
     h += '<h2 class="sec">No rice / no egg price off</h2><div class="panel" style="padding:14px"><p style="margin:0 0 6px">Amount taken off a dish for each order without rice or without egg. You can change it any time.</p><div class="row2"><label class="field"><span>No rice (₱ off)</span><input id="offRIn" inputmode="decimal" value="' + esc(S.offR) + '"></label><label class="field"><span>No egg (₱ off)</span><input id="offEIn" inputmode="decimal" value="' + esc(S.offE) + '"></label></div></div>';
-    h += '<style>.man{margin:6px 0 4px;padding-left:20px}.man li{margin:6px 0}</style><h2 class="sec">How to use this app</h2><div class="panel"><ul class="list"><li><details><summary class="dsum"><span><b style="margin:0;font-size:16px">1. Taking an order</b></span></summary><div class="dbody"><ol class="man"><li>Go to the <b>Sell</b> tab.</li><li>Tap the dish once for each order. Tap it again to add another one. The red number on the dish shows how many are in the order.</li><li>Added too many? Tap the red <b>−</b> button on the dish to remove one.</li><li>Tap <b>Review order</b> at the bottom of the screen.</li></ol></div></details></li><li><details><summary class="dsum"><span><b style="margin:0;font-size:16px">2. Getting paid</b></span></summary><div class="dbody"><ol class="man"><li>Choose <b>Cash</b> or <b>GCash</b>.</li><li>For cash, type the money received, or tap <b>Exact</b>, <b>100</b>, <b>200</b>, <b>500</b> or <b>1000</b>. The screen shows the <b>change</b> to give back.</li><li>Senior, PWD or suki discount? Type the discount in pesos, or tap <b>20% off</b>.</li><li>Tap <b>Record sale</b>. Do this for every order, or the day’s total will be wrong.</li></ol></div></details></li><li><details><summary class="dsum"><span><b style="margin:0;font-size:16px">No rice or no egg</b></span></summary><div class="dbody"><ol class="man"><li>Tap <b>Review order</b>. Under the dish you will see <b>No rice</b> and <b>No egg</b> with a − and + button.</li><li>Tap <b>+</b> once for each order that has no rice (or no egg). The price goes down by ₱10 each, so Hotsilog ₱65 with no rice becomes ₱55.</li><li>To change the ₱10, go to the <b>Menu</b> tab and edit <b>No rice / no egg price off</b>.</li></ol></div></details></li><li><details><summary class="dsum"><span><b style="margin:0;font-size:16px">3. A wrong order (Void)</b></span></summary><div class="dbody"><ol class="man"><li>Go to <b>Reports</b> and scroll down to <b>Orders</b>.</li><li>Find the order and tap <b>Void</b>. Tap it a second time to confirm. The sale is crossed out and the stock goes back.</li></ol></div></details></li><li><details><summary class="dsum"><span><b style="margin:0;font-size:16px">4. Morning: put in stock</b></span></summary><div class="dbody"><ol class="man"><li>Go to the <b>Stock</b> tab.</li><li>Find the item and tap <b>+ Stock</b>.</li><li>Type how many you will sell today and tap <b>Save stock</b>.</li><li>Do this for every item you will sell. Items with no stock yet show a dash.</li></ol></div></details></li><li><details><summary class="dsum"><span><b style="margin:0;font-size:16px">5. During the day: Sira (waste)</b></span></summary><div class="dbody"><ol class="man"><li>Something spoiled, dropped or thrown away? Go to <b>Stock</b>.</li><li>Tap <b>− Sira (waste)</b> on that item, type how many, and save. Add a note if you like.</li></ol></div></details></li><li><details><summary class="dsum"><span><b style="margin:0;font-size:16px">6. Closing time: Tira (remaining)</b></span></summary><div class="dbody"><ol class="man"><li>Count what is left of each item.</li><li>On the <b>Stock</b> tab, tap <b>Tira (remaining)</b>, type the number you counted, and save.</li><li>The app sets the stock to exactly what you counted, so it fixes any difference.</li></ol></div></details></li><li><details><summary class="dsum"><span><b style="margin:0;font-size:16px">Closing the shop</b></span></summary><div class="dbody"><ol class="man"><li>Go to the <b>Close</b> tab. The summary is automatic: sales for today, cash and GCash, best sellers, and for each item how many were stocked, sold, sira and what is left (tira).</li><li>Under <b>Closing</b>, count what is really left and fix any number that is different. Leave blank to skip.</li><li>Tap <b>Close shop</b>, then tap again to confirm. The tira counts are saved and the shop shows as closed.</li><li>Opened by mistake or need to sell more? Tap <b>Reopen shop</b>.</li></ol></div></details></li><li><details><summary class="dsum"><span><b style="margin:0;font-size:16px">7. Low and out of stock</b></span></summary><div class="dbody"><ol class="man"><li>A dish with 5 or fewer left shows <b>left</b> on the Sell screen. A dish at 0 shows <b>Out</b>, and a dish with nothing entered shows <b>No stock</b>.</li><li>You cannot sell a dish that is Out or has no stock. Add stock on the Stock tab first. A red number on the Stock tab means items are low or out.</li></ol></div></details></li><li><details><summary class="dsum"><span><b style="margin:0;font-size:16px">8. Seeing the sales</b></span></summary><div class="dbody"><ol class="man"><li>Go to <b>Reports</b>. Pick Today, Yesterday, 7 days, 30 days or Custom.</li><li>You will see total sales, cash vs GCash, best sellers, and <b>Day by day</b> with the sales, sira and tira for each day.</li><li><b>Download these sales (CSV)</b> saves the sales as a file you can open in Excel.</li></ol></div></details></li><li><details><summary class="dsum"><span><b style="margin:0;font-size:16px">9. Entered a day late?</b></span></summary><div class="dbody"><ol class="man"><li>Tap the <b>date</b> under the shop name at the top.</li><li>Pick the day you missed and tap <b>Use this date</b>. The date turns red while you are recording for another day.</li><li>Everything you enter is dated that day. Tap <b>Back to today</b> when you are done.</li></ol></div></details></li><li><details><summary class="dsum"><span><b style="margin:0;font-size:16px">10. Mistake in stock?</b></span></summary><div class="dbody"><ol class="man"><li>On the <b>Stock</b> tab, scroll to <b>Recent changes</b> and tap <b>Undo</b> twice on the wrong entry.</li><li>Or just do a new <b>Tira (remaining)</b> count to correct the number.</li></ol></div></details></li><li><details><summary class="dsum"><span><b style="margin:0;font-size:16px">11. Changing a price or hiding a dish</b></span></summary><div class="dbody"><ol class="man"><li>Go to the <b>Menu</b> tab and tap the dish.</li><li>Change the price, or untick <b>Show on the Sell screen</b> to hide it. Tap <b>Save item</b>.</li></ol></div></details></li><li><details><summary class="dsum"><span><b style="margin:0;font-size:16px">12. Important</b></span></summary><div class="dbody"><ol class="man"><li>All your data is saved <b>on this phone only</b>. Do not clear the browser’s data or history.</li><li>Tap <b>Back up data</b> (Menu tab) every few days, and keep the file safe.</li><li>To use another phone, open the link there and tap <b>Restore data</b> with your backup file.</li><li><b>Delete test sales and stock history</b> erases all sales and stock records. Only use it before you start for real.</li></ol></div></details></li></ul></div>';
+    h += '<h2 class="sec">Rice cost (for profit)</h2><div class="panel" style="padding:14px"><p style="margin:0 0 6px">Your rice is not counted in stock because you serve it in a container. Type how much one serving of rice costs you, so the app can show your real profit. Every meal comes with 1 rice, so this cost is added to each meal (not to Extras).</p><label class="field"><span>Rice cost per serving (₱)</span><input id="riceCostIn" inputmode="decimal" value="' + esc(S.riceCost) + '"></label></div>';
+    h += manualHtml();
     if (!items.length) return h + '<div class="empty"><b>No menu items yet</b></div>';
     var groups = [], seen = {};
     items.forEach(function (m) { var c = m.cat || "Other"; if (!seen[c]) { seen[c] = []; groups.push(c); } seen[c].push(m); });
@@ -864,7 +1258,7 @@ summary { font-weight: 700; cursor: pointer; min-height: 32px; }
       h += '<h2 class="sec">' + esc(g) + '</h2><div class="panel"><ul class="list">';
       seen[g].forEach(function (m) {
         var use = Object.keys(m.use || {}).map(function (k) { var q = m.use[k]; return stockName(k) + (q !== 1 ? " ×" + qf(q) : ""); }).join(", ");
-        var inner = '<span class="m-main"><span class="m-name">' + esc(m.name) + (m.active === false ? ' <span class="chip">Hidden</span>' : "") + '</span><br><span class="m-sub">' + (use ? "Uses " + esc(use) : "No stock linked") + '</span></span><span class="m-price">' + money(m.price) + "</span>";
+        var inner = '<span class="m-main"><span class="m-name">' + esc(m.name) + (m.active === false ? ' <span class="chip">Hidden</span>' : "") + '</span><br><span class="m-sub">' + (use ? "Uses " + esc(use) : "No stock linked") + (mEgg(m) ? " + egg" : "") + (mRice(m) ? " + rice" : "") + (function () { var c = dishCost(m); return c > 0 ? " · Cost " + money(Math.round(c * 100) / 100) + " · Profit " + money(Math.round((m.price - c) * 100) / 100) : ""; })() + '</span></span><span class="m-price">' + money(m.price) + "</span>";
         h += '<li class="' + (m.active === false ? "off" : "") + '">' + (S.admin ? '<button type="button" class="mrow" data-act="edit-menu" data-id="' + esc(m.id) + '">' + inner + "</button>" : '<div class="mrow">' + inner + "</div>") + "</li>";
       });
       h += "</ul></div>";
@@ -888,6 +1282,7 @@ summary { font-weight: 700; cursor: pointer; min-height: 32px; }
       '<label class="field"><span>Group</span><input id="mCat" list="catList" value="' + esc(m.cat) + '" placeholder="e.g. Silogs"></label></div>' +
       '<datalist id="catList">' + cats.map(function (c) { return '<option value="' + esc(c) + '">'; }).join("") + "</datalist>" +
       '<fieldset><legend>Stock used per order <span class="hint" style="font-weight:400;color:var(--muted)">(sold stock is taken off automatically)</span></legend><div id="recipe">' + rows + '</div><button class="btn small" type="button" data-act="add-ing"' + (S.stock.length ? "" : " disabled") + ">+ Add stock item</button></fieldset>" +
+      (isNew || m.cat !== "Extras" ? '<label class="check"><input type="checkbox" id="mEgg"' + ((isNew ? true : mEgg(m)) ? " checked" : "") + '> Comes with 1 egg (egg stock goes down 1 for each order)</label><label class="check"><input type="checkbox" id="mRice"' + ((isNew ? true : mRice(m)) ? " checked" : "") + '> Comes with rice (rice cost counts toward profit)</label>' : "") +
       '<label class="check"><input type="checkbox" id="mActive"' + (m.active !== false ? " checked" : "") + '> Show on the Sell screen</label>' +
       '<div class="actions"><button class="btn" data-act="close" type="button">Cancel</button><button class="btn primary" data-act="save-menu" type="button">Save item</button></div>');
   }
@@ -904,7 +1299,10 @@ summary { font-weight: 700; cursor: pointer; min-height: 32px; }
     var existing = S.sheet.id ? S.menu.filter(function (x) { return x.id === S.sheet.id; })[0] : null;
     var id = S.sheet.id || newId(name);
     var order = existing ? existing.order : S.menu.reduce(function (a, x) { return Math.max(a, x.order || 0); }, 0) + 1;
-    S.db.doc("menu/" + id).set({ name: name, price: price, cat: cat, order: order, active: $("#mActive").checked, use: use }).catch(fail);
+    var rec = { name: name, price: price, cat: cat, order: order, active: $("#mActive").checked, use: use };
+    if ($("#mEgg")) rec.egg = $("#mEgg").checked;
+    if ($("#mRice")) rec.rice = $("#mRice").checked;
+    S.db.doc("menu/" + id).set(rec).catch(fail);
     closeSheet(); toast("Saved " + name);
   }
 
@@ -939,7 +1337,7 @@ summary { font-weight: 700; cursor: pointer; min-height: 32px; }
       var wastes = S.moves.filter(function (m) { return m.kind === "waste" && m.ts >= d0 && m.ts <= d1; });
       if (!sales.length && !wastes.length) continue;
       var total = sales.reduce(function (a, s) { return a + s.total; }, 0);
-      var cash = sales.filter(function (s) { return s.pay !== "gcash"; }).reduce(function (a, s) { return a + s.total; }, 0), gcash = total - cash;
+      var cash = sumPay(sales, "cash"), gcash = sumPay(sales, "gcash"), utg = sumPay(sales, "utang");
       var wmap = {}, wval = 0;
       wastes.forEach(function (m) { var q = -m.qty, st = stockById(m.stockId); wmap[m.stockId] = (wmap[m.stockId] || 0) + q; if (st) wval += q * (Number(st.cost) || 0); });
       var wtxt = Object.keys(wmap).map(function (k) { var st = stockById(k); return esc(stockName(k)) + " " + qf(wmap[k]) + (st && st.unit ? " " + esc(st.unit) : ""); }).join(", ");
@@ -949,7 +1347,9 @@ summary { font-weight: 700; cursor: pointer; min-height: 32px; }
       }).join(" ");
       blocks += '<li><details' + (first ? " open" : "") + '><summary class="dsum"><span><b>' + esc(dlabel(d0)) + '</b> <span class="s-sub">' + sales.length + (sales.length === 1 ? " order" : " orders") + '</span></span><b class="num">' + money(total) + '</b></summary>' +
         '<div class="dbody"><p><b>Sales:</b> ' + money(total) + ' from ' + sales.length + (sales.length === 1 ? " order" : " orders") + '</p>' +
-        '<p><b>Cash:</b> ' + money(cash) + ' · <b>GCash:</b> ' + money(gcash) + '</p>' +
+        '<p><b>Cash:</b> ' + money(cash) + ' · <b>GCash:</b> ' + money(gcash) + (utg > 0 ? ' · <b>Utang:</b> ' + money(utg) : '') + '</p>' +
+        (function () { var ex = dayExpenses(dstr(d0)); return ex > 0 ? '<p><b>Expenses:</b> ' + money(ex) + '</p>' : ''; })() +
+        (function () { var tg = (function () { var c = closeRec(dstr(d0)); return c && c.target > 0 ? c.target : stockPlan(dstr(d0)).total; })(); return tg ? '<p><b>Expected (stock):</b> ' + money(tg) + ' · ' + (total >= tg ? '<span class="chip ok">Reached</span>' : '<span class="chip bad">Short ' + money(tg - total) + '</span>') + '</p>' : ''; })() +
         '<p><b>Sira:</b> ' + (wtxt ? wtxt + (wval > 0 ? " (about " + money(wval) + ")" : "") : "none") + '</p>' +
         '<p><b>Tira (remaining) at end of day:</b></p><div class="rem">' + (rem || '<span class="s-sub">No stock was entered yet.</span>') + "</div></div></details></li>";
       first = false;
@@ -967,16 +1367,20 @@ summary { font-weight: 700; cursor: pointer; min-height: 32px; }
   }
   function renderReports() {
     if (!allLoaded()) return '<div class="empty"><b>Loading reports…</b></div>';
-    var r = getRange(), rows = salesBetween(r.start, r.end), h = periodControls(r);
+    var r = getRange(), rows = salesBetween(r.start, r.end), h = forecastPanel() + '<h2 class="sec">Sales report</h2>' + periodControls(r);
     var total = rows.reduce(function (a, s) { return a + s.total; }, 0);
     if (!rows.length) return h + '<div class="panel"><div class="empty"><b>No sales in this period</b>Sales you record on the Sell tab show up here.</div></div>' + daySummary(r) + ordersList(r);
-    var cash = rows.filter(function (s) { return s.pay !== "gcash"; }).reduce(function (a, s) { return a + s.total; }, 0), gcash = total - cash;
-    var anyCost = S.stock.some(function (s) { return Number(s.cost) > 0; });
-    var cost = 0; rows.forEach(function (s) { s.lines.forEach(function (l) { cost += (l.cost || 0) * l.qty; }); });
+    var cash = sumPay(rows, "cash"), gcash = sumPay(rows, "gcash"), utg = sumPay(rows, "utang");
+    var anyCost = S.riceCost > 0 || S.stock.some(function (s) { return Number(s.cost) > 0; });
+    var cost = 0; rows.forEach(function (s) { s.lines.forEach(function (l) { cost += lineCost(l); }); });
     var disc = rows.reduce(function (a, s) { return a + (s.discount || 0); }, 0);
     h += '<div class="stats"><div class="stat"><small>Sales</small><b>' + money(total) + "</b><span>" + rows.length + (rows.length === 1 ? " order" : " orders") + (disc > 0 ? " · " + money(disc) + " discounts" : "") + '</span></div>' +
       (anyCost ? '<div class="stat"><small>Est. profit</small><b>' + money(total - cost) + "</b><span>After stock cost</span></div>" : '<div class="stat"><small>Average order</small><b>' + money(total / rows.length) + "</b><span>Per order</span></div>") + "</div>";
     h += '<div class="stat" style="margin-top:10px"><small>Payments</small><div class="split"><i class="c" style="width:' + (total ? cash / total * 100 : 0) + '%"></i><i class="g" style="width:' + (total ? gcash / total * 100 : 0) + '%"></i></div><div class="legend"><span><i class="sw" style="background:var(--ink)"></i>Cash <b>' + money(cash) + '</b></span><span><i class="sw" style="background:var(--accent)"></i>GCash <b>' + money(gcash) + "</b></span></div></div>";
+    (function () {
+      var ex = num(S.expenses.filter(function (e) { return e.ts >= r.start && e.ts < r.end; }).reduce(function (t, e) { return t + e.amount; }, 0));
+      if (ex > 0 || utg > 0) h += '<div class="panel" style="padding:12px;margin-top:10px">' + (utg > 0 ? '<div><b>Utang this period:</b> ' + money(utg) + ' <span class="s-sub">(not paid in cash yet, see Money tab)</span></div>' : '') + (ex > 0 ? '<div><b>Expenses:</b> ' + money(ex) + (anyCost ? ' · <b>Profit after expenses:</b> ' + money(total - cost - ex) : '') + '</div>' : '') + '</div>';
+    })();
     if (!anyCost) h += '<p style="color:var(--muted);font-size:13px;margin:8px 2px 0">' + (S.admin ? "Add a cost per unit in Stock to see estimated profit." : "") + "</p>";
     h += daySummary(r);
     var items, every, vals, ttl;
@@ -1012,7 +1416,7 @@ summary { font-weight: 700; cursor: pointer; min-height: 32px; }
     shown.forEach(function (s) {
       var items = (s.lines || []).map(function (l) { return l.qty + " " + l.name + optNote(l); }).join(", ");
       var armed = S.voidArm === s.id;
-      h += '<li><div class="sale' + (s.voided ? " void" : "") + '"><div><b>' + new Date(s.ts).toLocaleDateString("en-PH", { month: "short", day: "numeric" }) + " " + timeStr(s.ts) + '</b> <span class="chip">' + (s.pay === "gcash" ? "GCash" : "Cash") + "</span>" + (s.voided ? ' <span class="chip bad">Voided</span>' : "") + '<div class="s-items">' + esc(items) + (s.discount ? " · discount " + money(s.discount) : "") + '</div></div><div class="s-total">' + money(s.total) + "</div></div>" +
+      h += '<li><div class="sale' + (s.voided ? " void" : "") + '"><div><b>' + new Date(s.ts).toLocaleDateString("en-PH", { month: "short", day: "numeric" }) + " " + timeStr(s.ts) + '</b> <span class="chip">' + esc(payLabel(s)) + "</span>" + (s.voided ? ' <span class="chip bad">Voided</span>' : "") + '<div class="s-items">' + esc(items) + (s.discount ? " · discount " + money(s.discount) : "") + '</div></div><div class="s-total">' + money(s.total) + "</div></div>" +
         (s.voided || !S.canWrite ? "" : '<div class="s-acts"><button class="btn small' + (armed ? " primary" : "") + '" type="button" data-act="void" data-id="' + esc(s.id) + '">' + (armed ? "Tap again to void this order" : "Void") + "</button></div>") + "</li>";
     });
     h += "</ul></div>";
@@ -1024,7 +1428,7 @@ summary { font-weight: 700; cursor: pointer; min-height: 32px; }
     var q = function (v) { return '"' + String(v).replace(/"/g, '""') + '"'; };
     var out = ["Date,Time,Item,Qty,Unit price,Line total,Payment"];
     rows.sort(function (a, b) { return a.ts - b.ts; }).forEach(function (s) {
-      var pay = s.pay === "gcash" ? "GCash" : "Cash";
+      var pay = q(payLabel(s));
       s.lines.forEach(function (l) { out.push([dstr(s.ts), timeStr(s.ts), q(l.name + optNote(l)), l.qty, l.price, num(l.qty * l.price - (l.off || 0)), pay].join(",")); });
       if (s.discount) out.push([dstr(s.ts), timeStr(s.ts), q("Discount"), 1, -s.discount, -s.discount, pay].join(","));
     });
@@ -1040,13 +1444,21 @@ summary { font-weight: 700; cursor: pointer; min-height: 32px; }
     var ws = workStart(), key = dstr(ws), d1 = dayMs(key, 1) - 1, isToday = key === todayStr();
     var rows = salesBetween(ws, d1 + 1), cl = closeRec(key);
     var total = rows.reduce(function (a, s) { return a + s.total; }, 0);
-    var cash = rows.filter(function (s) { return s.pay !== "gcash"; }).reduce(function (a, s) { return a + s.total; }, 0), gcash = total - cash;
+    var cash = sumPay(rows, "cash"), gcash = sumPay(rows, "gcash"), utg = sumPay(rows, "utang");
     var disc = rows.reduce(function (a, s) { return a + (s.discount || 0); }, 0);
     var h = "";
     if (cl) h += '<div class="note info"><b>Closed</b> at ' + timeStr(cl.at || cl.ts) + '. Salamat po! <button class="btn small" data-act="reopen" type="button">Reopen shop</button></div>';
     h += '<h2 class="sec">Summary · ' + esc(dlabel(ws)) + '</h2>';
     h += '<div class="stats"><div class="stat"><small>Sales</small><b>' + money(total) + '</b><span>' + rows.length + (rows.length === 1 ? " order" : " orders") + (disc > 0 ? " · " + money(disc) + " discounts" : "") + '</span></div>' +
-      '<div class="stat"><small>Cash</small><b>' + money(cash) + '</b><span>GCash ' + money(gcash) + '</span></div></div>';
+      '<div class="stat"><small>Cash</small><b>' + money(cash) + '</b><span>GCash ' + money(gcash) + (utg > 0 ? ' · Utang ' + money(utg) : '') + '</span></div></div>';
+    (function () {
+      var pf = profitStat(rows, total);
+      if (pf.has || S.riceCost > 0) h += '<div class="panel" style="padding:12px;margin-top:10px"><div style="display:flex;justify-content:space-between;align-items:baseline"><b>Est. profit today</b><b style="font-size:20px;color:' + (pf.profit >= 0 ? 'var(--ok)' : 'var(--accent)') + '">' + money(pf.profit) + '</b></div><div class="s-sub">Sales ' + money(total) + ' − cost ' + money(pf.cost) + ' (stock, egg and rice)' + (total > 0 ? ' · ' + Math.round(pf.profit / total * 100) + '% margin' : '') + (dayExpenses(key) > 0 ? '<br>Expenses ' + money(dayExpenses(key)) + ' → take-home <b>' + money(pf.profit - dayExpenses(key)) + '</b>' : '') + '</div></div>';
+      var exd = dayExpenses(key), col = dayCollected(key);
+      if (exd > 0 || col > 0 || utg > 0) h += '<div class="panel" style="padding:12px;margin-top:10px"><div style="display:flex;justify-content:space-between;align-items:baseline"><b>Cash on hand</b><b style="font-size:20px">' + money(cash + col - exd) + '</b></div><div class="s-sub">Cash sales ' + money(cash) + (col > 0 ? ' + utang paid ' + money(col) : '') + (exd > 0 ? ' − expenses ' + money(exd) : '') + (utg > 0 ? '<br>Utang given today (not in cash): ' + money(utg) : '') + '</div></div>';
+      else h += '<div class="panel" style="padding:12px;margin-top:10px"><b>Profit</b><div class="s-sub">Add a cost on each Stock item and your rice cost on the Menu tab to see your profit here.</div></div>';
+    })();
+    h += '<div style="margin-top:10px"></div>' + targetBlock(key, total, rows, cl ? { closed: true, saved: (cl.target > 0 ? cl.target : stockPlan(key).total) } : { closed: false });
     var agg = {};
     rows.forEach(function (s) { (s.lines || []).forEach(function (l) { var a = agg[l.id] || (agg[l.id] = { name: l.name, qty: 0, rev: 0 }); a.qty += l.qty; a.rev += l.qty * l.price - (l.off || 0); }); });
     var rank = Object.keys(agg).map(function (k) { return agg[k]; }).sort(function (a, b) { return b.qty - a.qty || b.rev - a.rev; }).slice(0, 5);
@@ -1056,7 +1468,7 @@ summary { font-weight: 700; cursor: pointer; min-height: 32px; }
     var before = ledgerAt(S.events, ws - 1), end = isToday ? { on: S.derived.onHand, touched: S.derived.touched } : ledgerAt(S.events, d1);
     var added = {}, wasted = {}, sold = {};
     S.moves.forEach(function (m) { if (m.ts < ws || m.ts > d1) return; if (m.kind === "delivery") added[m.stockId] = (added[m.stockId] || 0) + m.qty; if (m.kind === "waste") wasted[m.stockId] = (wasted[m.stockId] || 0) - m.qty; });
-    rows.forEach(function (s) { (s.lines || []).forEach(function (l) { var u = l.use || {}; for (var k in u) sold[k] = (sold[k] || 0) + u[k] * l.qty; }); });
+    rows.forEach(function (s) { (s.lines || []).forEach(function (l) { var u = lineUseAbs(l); for (var k in u) sold[k] = (sold[k] || 0) + u[k]; }); });
     var items = S.stock.slice().sort(byOrder), gs = [], gm = {};
     items.forEach(function (st) {
       if (!end.touched[st.id] && !added[st.id] && !sold[st.id] && !wasted[st.id]) return;
@@ -1099,9 +1511,9 @@ summary { font-weight: 700; cursor: pointer; min-height: 32px; }
     });
     if (bad) { toast("Tira must be numbers, 0 or more.", true); return; }
     var rows = salesBetween(dayMs(key, 0), dayMs(key, 1)), total = rows.reduce(function (a, s) { return a + s.total; }, 0);
-    var cash = rows.filter(function (s) { return s.pay !== "gcash"; }).reduce(function (a, s) { return a + s.total; }, 0);
+    var cash = sumPay(rows, "cash");
     recs.forEach(function (r) { S.db.collection("moves").add(r).catch(fail); });
-    S.db.doc("closes/c" + key).set({ date: key, ts: ts, at: Date.now(), total: total, orders: rows.length, cash: cash, gcash: num(total - cash) }).catch(fail);
+    S.db.doc("closes/c" + key).set({ date: key, ts: ts, at: Date.now(), total: total, orders: rows.length, cash: cash, gcash: sumPay(rows, "gcash"), utang: sumPay(rows, "utang"), expenses: dayExpenses(key), collected: dayCollected(key), target: stockPlan(key).total, reached: stockPlan(key).total > 0 ? total >= stockPlan(key).total : null }).catch(fail);
     S.tira = {}; S.closeArm = false; toast("Shop closed. Salamat!");
   }
   function reopenShop() {
@@ -1113,7 +1525,7 @@ summary { font-weight: 700; cursor: pointer; min-height: 32px; }
   /* ---------- render ---------- */
   function renderAll() {
     derive(); renderHeader(); renderBanner();
-    var v = S.tab === "sell" ? renderSell() : S.tab === "stock" ? renderStock() : S.tab === "reports" ? renderReports() : S.tab === "close" ? renderClose() : renderMenu();
+    var v = S.tab === "sell" ? renderSell() : S.tab === "stock" ? renderStock() : S.tab === "reports" ? renderReports() : S.tab === "close" ? renderClose() : S.tab === "money" ? renderMoney() : renderMenu();
     $("#view").innerHTML = v;
     $$(".tabbar [data-tab]").forEach(function (b) { if (b.dataset.tab === S.tab) b.setAttribute("aria-current", "page"); else b.removeAttribute("aria-current"); });
     renderCartBar();
@@ -1147,7 +1559,7 @@ summary { font-weight: 700; cursor: pointer; min-height: 32px; }
   function doReset() {
     if ($("#resetIn").value.trim().toUpperCase() !== "RESET") { toast("Type RESET to confirm.", true); return; }
     if (!guardWrite()) return;
-    var jobs = S.sales.map(function (s) { return "sales/" + s.id; }).concat(S.moves.map(function (m) { return "moves/" + m.id; })).concat(S.closes.map(function (c) { return "closes/" + c.id; }));
+    var jobs = S.sales.map(function (s) { return "sales/" + s.id; }).concat(S.moves.map(function (m) { return "moves/" + m.id; })).concat(S.closes.map(function (c) { return "closes/" + c.id; })).concat(S.expenses.map(function (c) { return "expenses/" + c.id; })).concat(S.credits.map(function (c) { return "credits/" + c.id; }));
     closeSheet(); S.cart = {}; S.cash = 0; toast("Deleting " + jobs.length + " records…");
     (async function () {
       for (var i = 0; i < jobs.length; i += 10) await Promise.all(jobs.slice(i, i + 10).map(function (p) { return S.db.doc(p).delete(); }));
@@ -1160,7 +1572,7 @@ summary { font-weight: 700; cursor: pointer; min-height: 32px; }
     var b = e.target.closest("[data-act]"); if (!b) return;
     var a = b.dataset.act, id = b.dataset.id;
     switch (a) {
-      case "tab": S.tab = b.dataset.tab; S.closeArm = false; S.tira = {}; S.voidArm = null; S.undoArm = null; window.scrollTo(0, 0); renderAll(); break;
+      case "tab": S.tab = b.dataset.tab; S.closeArm = false; S.tira = {}; S.voidArm = null; S.undoArm = null; S.expArm = null; window.scrollTo(0, 0); renderAll(); break;
       case "jump": var gt = document.getElementById("grp-" + b.dataset.g); if (gt) gt.scrollIntoView({ block: "start" }); break;
       case "add": var pr1 = addProblem(id); if (pr1) { toast("Can’t sell: " + pr1, true); break; } if (isClosedDay(dstr(workStart()))) { toast("The shop is closed. Reopen it on the Close tab.", true); break; } S.cart[id] = (S.cart[id] || 0) + 1; renderAll(); break;
       case "dec": if (S.cart[id] > 1) S.cart[id]--; else { delete S.cart[id]; delete S.mods[id]; } renderAll(); break;
@@ -1172,6 +1584,16 @@ summary { font-weight: 700; cursor: pointer; min-height: 32px; }
       case "cdec": if (S.cart[id] > 1) S.cart[id]--; else { delete S.cart[id]; delete S.mods[id]; } renderAll(); if (!cartCount()) closeSheet(); else refreshCartSheet(); break;
       case "clear-cart": S.cart = {}; S.mods = {}; S.cash = 0; S.disc = 0; closeSheet(); renderAll(); break;
       case "pay": S.pay = b.dataset.pay; refreshCartSheet(); break;
+      case "open-calc": calcSheet(); break;
+      case "calc": calcPress(b.dataset.k); break;
+      case "calc-use": var ch = S.calc.hist[Number(b.dataset.i)]; if (ch) { S.calc.expr = ch.r; S.calc.done = false; S.calc.prev = ""; S.calc.err = ""; calcRender(); } break;
+      case "open-utang": utangSheet(b.dataset.who); break;
+      case "pay-full": $("#payAmt").value = b.dataset.v; break;
+      case "save-pay": saveUtangPay(); break;
+      case "open-expense": expenseSheet(b.dataset.label || ""); break;
+      case "exp-label": $("#expLabel").value = b.dataset.label; break;
+      case "save-expense": saveExpense(); break;
+      case "del-exp": delExpense(b.dataset.id); break;
       case "cash": S.cash = b.dataset.v === "exact" ? cartTotal() : parseNum(b.dataset.v); refreshCartSheet(); break;
       case "disc-pct": S.disc = num(cartSubtotal() * (+b.dataset.v) / 100); refreshCartSheet(); renderCartBar(); break;
       case "charge": charge(); break;
@@ -1214,10 +1636,12 @@ summary { font-weight: 700; cursor: pointer; min-height: 32px; }
       case "asof-now": S.asOf = ""; renderAll(); break;
       case "open-reset": if (S.admin) resetSheet(); break;
       case "do-reset": doReset(); break;
+
     }
   });
   document.addEventListener("input", function (e) {
     if (e.target.classList && e.target.classList.contains("tiraIn")) { S.tira[e.target.dataset.id] = e.target.value; if (S.closeArm) { S.closeArm = false; var cb = $('[data-act="close-shop"]'); if (cb) cb.textContent = "Close shop for today"; } }
+    if (e.target.id === "whoIn") S.who = e.target.value;
     if (e.target.id === "cashIn") { S.cash = parseNum(e.target.value) || 0; updateChange(); }
     if (e.target.id === "discIn") {
       S.disc = Math.max(parseNum(e.target.value) || 0, 0);
@@ -1230,14 +1654,26 @@ summary { font-weight: 700; cursor: pointer; min-height: 32px; }
     if (id === "fromIn") { if (v) { S.from = v; S.ordersMax = 12; renderAll(); } }
     else if (id === "toIn") { if (v) { S.to = v; S.ordersMax = 12; renderAll(); } }
     else if (id === "asOfIn") { S.asOf = v || ""; renderAll(); }
+    else if (id === "riceCostIn") {
+      var rv = parseNum(v || 0); if (!(rv >= 0)) { toast("Enter an amount like 8.", true); return; }
+      S.riceCost = rv;
+      try { localStorage.setItem("tapsihan_off", JSON.stringify({ r: S.offR, e: S.offE, c: S.riceCost })); } catch (x) {}
+      toast("Saved"); renderAll();
+    }
     else if (id === "offRIn" || id === "offEIn") {
       var nv = parseNum(v); if (!(nv >= 0)) { toast("Enter an amount like 10.", true); return; }
       if (id === "offRIn") S.offR = nv; else S.offE = nv;
-      try { localStorage.setItem("tapsihan_off", JSON.stringify({ r: S.offR, e: S.offE })); } catch (x) {}
+      try { localStorage.setItem("tapsihan_off", JSON.stringify({ r: S.offR, e: S.offE, c: S.riceCost })); } catch (x) {}
       toast("Saved"); renderAll();
     }
   });
-  document.addEventListener("keydown", function (e) { if (e.key === "Escape" && S.sheet) closeSheet(); });
+  document.addEventListener("keydown", function (e) {
+    if (e.key === "Escape" && S.sheet) { closeSheet(); return; }
+    if (!S.sheet || S.sheet.type !== "calc" || e.ctrlKey || e.metaKey || e.altKey) return;
+    var k = e.key, map = { "*": "×", "x": "×", "X": "×", "/": "÷", "-": "−", "Enter": "=", "=": "=", "Backspace": "⌫", "Delete": "C", "c": "C", "C": "C" };
+    var key = map[k] || k;
+    if (/^[0-9.+%]$/.test(key) || "×÷−=⌫C".indexOf(key) >= 0 && key.length === 1) { e.preventDefault(); calcPress(key); }
+  });
 
 /* ---------- connect ---------- */
   renderAll();
@@ -1253,7 +1689,7 @@ summary { font-weight: 700; cursor: pointer; min-height: 32px; }
     }
     if (!db) { renderAll(); return; }
     var timer = setTimeout(function () { S.slow = true; renderAll(); }, 10000);
-    ["menu", "stock", "sales", "moves", "closes"].forEach(function (name) {
+    ["menu", "stock", "sales", "moves", "closes", "expenses", "credits"].forEach(function (name) {
       db.collection(name).onSnapshot(function (snap) {
         S[name] = snap.docs.map(function (d) { var o = Object.assign({}, d.data()); o.id = d.id; return o; });
         S.loaded[name] = true;

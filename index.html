@@ -159,7 +159,7 @@ h2.sec { scroll-margin-top: 88px; }
   position: fixed; left: 0; right: 0; bottom: 0; z-index: 7; height: var(--tabh);
   padding: 0 var(--gr) env(safe-area-inset-bottom, 0px) var(--gl); background: var(--surface); border-top: 1px solid var(--line);
 }
-.tabbar .wrap { display: grid; grid-template-columns: repeat(4, 1fr); height: 100%; }
+.tabbar .wrap { display: grid; grid-template-columns: repeat(5, 1fr); height: 100%; }
 .tabbar button {
   border: 0; background: transparent; color: var(--muted); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;
   font-size: 12px; font-weight: 700; letter-spacing: .02em; position: relative;
@@ -260,6 +260,7 @@ details[open] > .dsum::after { content: "▴"; }
 .actions .btn { flex: 1; }
 .cline { display: grid; grid-template-columns: 1fr auto; gap: 8px 12px; align-items: center; padding: 10px 0; }
 .cline + .cline { border-top: 1px solid var(--line); }
+.tiraIn { width: 96px; min-height: 46px; padding: 6px 10px; border-radius: 8px; border: 1px solid var(--line); background: var(--bg); font-size: 20px; font-weight: 700; text-align: right; font-variant-numeric: tabular-nums; }
 .cline .c-name { font-weight: 700; }
 .cline .c-sub { color: var(--muted); font-size: 13px; }
 .stepper { display: flex; align-items: center; gap: 4px; }
@@ -333,6 +334,9 @@ summary { font-weight: 700; cursor: pointer; min-height: 32px; }
     </button>
     <button type="button" data-act="tab" data-tab="reports">
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg>Reports
+    </button>
+    <button type="button" data-act="tab" data-tab="close">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>Close<span class="dot" id="closeDot" hidden>✓</span>
     </button>
     <button type="button" data-act="tab" data-tab="menu">
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 6h13M8 12h13M8 18h13M3.5 6h.01M3.5 12h.01M3.5 18h.01"/></svg>Menu
@@ -448,7 +452,7 @@ summary { font-weight: 700; cursor: pointer; min-height: 32px; }
             var obj = JSON.parse(r.result);
             if (!obj || typeof obj !== "object" || !obj.menu && !obj.stock && !obj.sales && !obj.moves) throw 0;
             if (!confirm("Replace everything on this phone with the backup?")) return;
-            data = obj; save(); ["menu", "stock", "sales", "moves"].forEach(notify); alert("Restored.");
+            data = obj; save(); ["menu", "stock", "sales", "moves", "closes"].forEach(notify); alert("Restored.");
           } catch (x) { alert("That is not a Tapsihan backup file."); }
         };
         r.readAsText(f);
@@ -480,8 +484,8 @@ summary { font-weight: 700; cursor: pointer; min-height: 32px; }
 
   var S = {
     db: null, dl: null, admin: true, canWrite: true,
-    menu: [], stock: [], sales: [], moves: [],
-    loaded: { menu: false, stock: false, sales: false, moves: false },
+    menu: [], stock: [], sales: [], moves: [], closes: [], tira: {}, closeArm: false,
+    loaded: { menu: false, stock: false, sales: false, moves: false, closes: false },
     tab: "sell", cart: {}, mods: {}, offR: 10, offE: 10, pay: "cash", cash: 0, disc: 0, period: "today", workDate: "", workTime: "", asOf: "", from: "", to: "", ordersMax: 12, voidArm: null, undoArm: null, events: [],
     sheet: null, slow: false, err: null, ready: false, derived: { onHand: {}, touched: {} }
   };
@@ -602,6 +606,7 @@ summary { font-weight: 700; cursor: pointer; min-height: 32px; }
     $("#todayTotal").textContent = money(t.reduce(function (a, s) { return a + s.total; }, 0));
     $("#todayOrders").textContent = t.length + (t.length === 1 ? " order" : " orders");
     var attn = S.stock.filter(function (s) { var st = status(s); return st === "low" || st === "out"; }).length;
+    var cdot = $("#closeDot"); if (cdot) cdot.hidden = !isClosedDay(dstr(ws));
     var dot = $("#lowDot"); dot.hidden = !attn; dot.textContent = attn;
   }
   function renderBanner() {
@@ -617,7 +622,7 @@ summary { font-weight: 700; cursor: pointer; min-height: 32px; }
     }
     $("#banner").innerHTML = h;
   }
-  var allLoaded = function () { var l = S.loaded; return l.menu && l.stock && l.sales && l.moves; };
+  var allLoaded = function () { var l = S.loaded; return l.menu && l.stock && l.sales && l.moves && l.closes; };
 
 /* ---------- SELL ---------- */
   function cartLines() {
@@ -642,6 +647,7 @@ summary { font-weight: 700; cursor: pointer; min-height: 32px; }
     var items = S.menu.filter(function (m) { return m.active !== false; }).sort(byOrder);
     if (!items.length) return '<div class="empty"><b>No menu items yet</b>' + (S.admin ? 'Add your dishes on the Menu tab.' : 'The owner needs to add the menu first.') + '</div>';
     var h = "", untouched = S.stock.filter(function (s) { return !S.derived.touched[s.id]; }).length;
+    if (isClosedDay(dstr(workStart()))) h += '<div class="note">The shop is closed. <button class="btn small" data-act="reopen" type="button">Reopen shop</button></div>';
     if (S.stock.length && untouched === S.stock.length) h += '<div class="note info">No stock entered yet, so the “left” numbers and low-stock alerts are off. <button class="btn small" data-act="tab" data-tab="stock" type="button">Add stock</button></div>';
     var groups = [], seen = {};
     items.forEach(function (m) { var c = m.cat || "Other"; if (!seen[c]) { seen[c] = []; groups.push(c); } seen[c].push(m); });
@@ -708,6 +714,7 @@ summary { font-weight: 700; cursor: pointer; min-height: 32px; }
   function showCart() { S.sheet = { type: "cart" }; openSheet(cartSheetHtml()); updateChange(); }
   function charge() {
     if (!guardWrite()) return;
+    if (isClosedDay(dstr(stamp()))) { toast("The shop is closed. Reopen it on the Close tab first.", true); return; }
     var lines = cartLines(); if (!lines.length) return;
     var disc = num(cartDisc()), total = cartTotal();
     var rec = { ts: stamp(), at: Date.now(), lines: lines, total: total, pay: S.pay, voided: false };
@@ -832,7 +839,7 @@ summary { font-weight: 700; cursor: pointer; min-height: 32px; }
     var items = S.menu.slice().sort(byOrder);
     var h = S.admin ? '<p><button class="btn primary" data-act="new-menu" type="button">Add menu item</button></p>' : '<div class="note info">Prices and recipes are set by the owner.</div>';
     h += '<h2 class="sec">No rice / no egg price off</h2><div class="panel" style="padding:14px"><p style="margin:0 0 6px">Amount taken off a dish for each order without rice or without egg. You can change it any time.</p><div class="row2"><label class="field"><span>No rice (₱ off)</span><input id="offRIn" inputmode="decimal" value="' + esc(S.offR) + '"></label><label class="field"><span>No egg (₱ off)</span><input id="offEIn" inputmode="decimal" value="' + esc(S.offE) + '"></label></div></div>';
-    h += '<style>.man{margin:6px 0 4px;padding-left:20px}.man li{margin:6px 0}</style><h2 class="sec">How to use this app</h2><div class="panel"><ul class="list"><li><details><summary class="dsum"><span><b style="margin:0;font-size:16px">1. Taking an order</b></span></summary><div class="dbody"><ol class="man"><li>Go to the <b>Sell</b> tab.</li><li>Tap the dish once for each order. Tap it again to add another one. The red number on the dish shows how many are in the order.</li><li>Added too many? Tap the red <b>−</b> button on the dish to remove one.</li><li>Tap <b>Review order</b> at the bottom of the screen.</li></ol></div></details></li><li><details><summary class="dsum"><span><b style="margin:0;font-size:16px">2. Getting paid</b></span></summary><div class="dbody"><ol class="man"><li>Choose <b>Cash</b> or <b>GCash</b>.</li><li>For cash, type the money received, or tap <b>Exact</b>, <b>100</b>, <b>200</b>, <b>500</b> or <b>1000</b>. The screen shows the <b>change</b> to give back.</li><li>Senior, PWD or suki discount? Type the discount in pesos, or tap <b>20% off</b>.</li><li>Tap <b>Record sale</b>. Do this for every order, or the day’s total will be wrong.</li></ol></div></details></li><li><details><summary class="dsum"><span><b style="margin:0;font-size:16px">No rice or no egg</b></span></summary><div class="dbody"><ol class="man"><li>Tap <b>Review order</b>. Under the dish you will see <b>No rice</b> and <b>No egg</b> with a − and + button.</li><li>Tap <b>+</b> once for each order that has no rice (or no egg). The price goes down by ₱10 each, so Hotsilog ₱65 with no rice becomes ₱55.</li><li>To change the ₱10, go to the <b>Menu</b> tab and edit <b>No rice / no egg price off</b>.</li></ol></div></details></li><li><details><summary class="dsum"><span><b style="margin:0;font-size:16px">3. A wrong order (Void)</b></span></summary><div class="dbody"><ol class="man"><li>Go to <b>Reports</b> and scroll down to <b>Orders</b>.</li><li>Find the order and tap <b>Void</b>. Tap it a second time to confirm. The sale is crossed out and the stock goes back.</li></ol></div></details></li><li><details><summary class="dsum"><span><b style="margin:0;font-size:16px">4. Morning: put in stock</b></span></summary><div class="dbody"><ol class="man"><li>Go to the <b>Stock</b> tab.</li><li>Find the item and tap <b>+ Stock</b>.</li><li>Type how many you will sell today and tap <b>Save stock</b>.</li><li>Do this for every item you will sell. Items with no stock yet show a dash.</li></ol></div></details></li><li><details><summary class="dsum"><span><b style="margin:0;font-size:16px">5. During the day: Sira (waste)</b></span></summary><div class="dbody"><ol class="man"><li>Something spoiled, dropped or thrown away? Go to <b>Stock</b>.</li><li>Tap <b>− Sira (waste)</b> on that item, type how many, and save. Add a note if you like.</li></ol></div></details></li><li><details><summary class="dsum"><span><b style="margin:0;font-size:16px">6. Closing time: Tira (remaining)</b></span></summary><div class="dbody"><ol class="man"><li>Count what is left of each item.</li><li>On the <b>Stock</b> tab, tap <b>Tira (remaining)</b>, type the number you counted, and save.</li><li>The app sets the stock to exactly what you counted, so it fixes any difference.</li></ol></div></details></li><li><details><summary class="dsum"><span><b style="margin:0;font-size:16px">7. Low and out of stock</b></span></summary><div class="dbody"><ol class="man"><li>A dish with 5 or fewer left shows <b>left</b> on the Sell screen. A dish at 0 shows <b>Out</b>.</li><li>A red number on the Stock tab means items are low or out. You can still sell an item that shows Out.</li></ol></div></details></li><li><details><summary class="dsum"><span><b style="margin:0;font-size:16px">8. Seeing the sales</b></span></summary><div class="dbody"><ol class="man"><li>Go to <b>Reports</b>. Pick Today, Yesterday, 7 days, 30 days or Custom.</li><li>You will see total sales, cash vs GCash, best sellers, and <b>Day by day</b> with the sales, sira and tira for each day.</li><li><b>Download these sales (CSV)</b> saves the sales as a file you can open in Excel.</li></ol></div></details></li><li><details><summary class="dsum"><span><b style="margin:0;font-size:16px">9. Entered a day late?</b></span></summary><div class="dbody"><ol class="man"><li>Tap the <b>date</b> under the shop name at the top.</li><li>Pick the day you missed and tap <b>Use this date</b>. The date turns red while you are recording for another day.</li><li>Everything you enter is dated that day. Tap <b>Back to today</b> when you are done.</li></ol></div></details></li><li><details><summary class="dsum"><span><b style="margin:0;font-size:16px">10. Mistake in stock?</b></span></summary><div class="dbody"><ol class="man"><li>On the <b>Stock</b> tab, scroll to <b>Recent changes</b> and tap <b>Undo</b> twice on the wrong entry.</li><li>Or just do a new <b>Tira (remaining)</b> count to correct the number.</li></ol></div></details></li><li><details><summary class="dsum"><span><b style="margin:0;font-size:16px">11. Changing a price or hiding a dish</b></span></summary><div class="dbody"><ol class="man"><li>Go to the <b>Menu</b> tab and tap the dish.</li><li>Change the price, or untick <b>Show on the Sell screen</b> to hide it. Tap <b>Save item</b>.</li></ol></div></details></li><li><details><summary class="dsum"><span><b style="margin:0;font-size:16px">12. Important</b></span></summary><div class="dbody"><ol class="man"><li>All your data is saved <b>on this phone only</b>. Do not clear the browser’s data or history.</li><li>Tap <b>Back up data</b> (Menu tab) every few days, and keep the file safe.</li><li>To use another phone, open the link there and tap <b>Restore data</b> with your backup file.</li><li><b>Delete test sales and stock history</b> erases all sales and stock records. Only use it before you start for real.</li></ol></div></details></li></ul></div>';
+    h += '<style>.man{margin:6px 0 4px;padding-left:20px}.man li{margin:6px 0}</style><h2 class="sec">How to use this app</h2><div class="panel"><ul class="list"><li><details><summary class="dsum"><span><b style="margin:0;font-size:16px">1. Taking an order</b></span></summary><div class="dbody"><ol class="man"><li>Go to the <b>Sell</b> tab.</li><li>Tap the dish once for each order. Tap it again to add another one. The red number on the dish shows how many are in the order.</li><li>Added too many? Tap the red <b>−</b> button on the dish to remove one.</li><li>Tap <b>Review order</b> at the bottom of the screen.</li></ol></div></details></li><li><details><summary class="dsum"><span><b style="margin:0;font-size:16px">2. Getting paid</b></span></summary><div class="dbody"><ol class="man"><li>Choose <b>Cash</b> or <b>GCash</b>.</li><li>For cash, type the money received, or tap <b>Exact</b>, <b>100</b>, <b>200</b>, <b>500</b> or <b>1000</b>. The screen shows the <b>change</b> to give back.</li><li>Senior, PWD or suki discount? Type the discount in pesos, or tap <b>20% off</b>.</li><li>Tap <b>Record sale</b>. Do this for every order, or the day’s total will be wrong.</li></ol></div></details></li><li><details><summary class="dsum"><span><b style="margin:0;font-size:16px">No rice or no egg</b></span></summary><div class="dbody"><ol class="man"><li>Tap <b>Review order</b>. Under the dish you will see <b>No rice</b> and <b>No egg</b> with a − and + button.</li><li>Tap <b>+</b> once for each order that has no rice (or no egg). The price goes down by ₱10 each, so Hotsilog ₱65 with no rice becomes ₱55.</li><li>To change the ₱10, go to the <b>Menu</b> tab and edit <b>No rice / no egg price off</b>.</li></ol></div></details></li><li><details><summary class="dsum"><span><b style="margin:0;font-size:16px">3. A wrong order (Void)</b></span></summary><div class="dbody"><ol class="man"><li>Go to <b>Reports</b> and scroll down to <b>Orders</b>.</li><li>Find the order and tap <b>Void</b>. Tap it a second time to confirm. The sale is crossed out and the stock goes back.</li></ol></div></details></li><li><details><summary class="dsum"><span><b style="margin:0;font-size:16px">4. Morning: put in stock</b></span></summary><div class="dbody"><ol class="man"><li>Go to the <b>Stock</b> tab.</li><li>Find the item and tap <b>+ Stock</b>.</li><li>Type how many you will sell today and tap <b>Save stock</b>.</li><li>Do this for every item you will sell. Items with no stock yet show a dash.</li></ol></div></details></li><li><details><summary class="dsum"><span><b style="margin:0;font-size:16px">5. During the day: Sira (waste)</b></span></summary><div class="dbody"><ol class="man"><li>Something spoiled, dropped or thrown away? Go to <b>Stock</b>.</li><li>Tap <b>− Sira (waste)</b> on that item, type how many, and save. Add a note if you like.</li></ol></div></details></li><li><details><summary class="dsum"><span><b style="margin:0;font-size:16px">6. Closing time: Tira (remaining)</b></span></summary><div class="dbody"><ol class="man"><li>Count what is left of each item.</li><li>On the <b>Stock</b> tab, tap <b>Tira (remaining)</b>, type the number you counted, and save.</li><li>The app sets the stock to exactly what you counted, so it fixes any difference.</li></ol></div></details></li><li><details><summary class="dsum"><span><b style="margin:0;font-size:16px">Closing the shop</b></span></summary><div class="dbody"><ol class="man"><li>Go to the <b>Close</b> tab. The summary is automatic: sales for today, cash and GCash, best sellers, and for each item how many were stocked, sold, sira and what is left (tira).</li><li>Under <b>Closing</b>, count what is really left and fix any number that is different. Leave blank to skip.</li><li>Tap <b>Close shop</b>, then tap again to confirm. The tira counts are saved and the shop shows as closed.</li><li>Opened by mistake or need to sell more? Tap <b>Reopen shop</b>.</li></ol></div></details></li><li><details><summary class="dsum"><span><b style="margin:0;font-size:16px">7. Low and out of stock</b></span></summary><div class="dbody"><ol class="man"><li>A dish with 5 or fewer left shows <b>left</b> on the Sell screen. A dish at 0 shows <b>Out</b>.</li><li>A red number on the Stock tab means items are low or out. You can still sell an item that shows Out.</li></ol></div></details></li><li><details><summary class="dsum"><span><b style="margin:0;font-size:16px">8. Seeing the sales</b></span></summary><div class="dbody"><ol class="man"><li>Go to <b>Reports</b>. Pick Today, Yesterday, 7 days, 30 days or Custom.</li><li>You will see total sales, cash vs GCash, best sellers, and <b>Day by day</b> with the sales, sira and tira for each day.</li><li><b>Download these sales (CSV)</b> saves the sales as a file you can open in Excel.</li></ol></div></details></li><li><details><summary class="dsum"><span><b style="margin:0;font-size:16px">9. Entered a day late?</b></span></summary><div class="dbody"><ol class="man"><li>Tap the <b>date</b> under the shop name at the top.</li><li>Pick the day you missed and tap <b>Use this date</b>. The date turns red while you are recording for another day.</li><li>Everything you enter is dated that day. Tap <b>Back to today</b> when you are done.</li></ol></div></details></li><li><details><summary class="dsum"><span><b style="margin:0;font-size:16px">10. Mistake in stock?</b></span></summary><div class="dbody"><ol class="man"><li>On the <b>Stock</b> tab, scroll to <b>Recent changes</b> and tap <b>Undo</b> twice on the wrong entry.</li><li>Or just do a new <b>Tira (remaining)</b> count to correct the number.</li></ol></div></details></li><li><details><summary class="dsum"><span><b style="margin:0;font-size:16px">11. Changing a price or hiding a dish</b></span></summary><div class="dbody"><ol class="man"><li>Go to the <b>Menu</b> tab and tap the dish.</li><li>Change the price, or untick <b>Show on the Sell screen</b> to hide it. Tap <b>Save item</b>.</li></ol></div></details></li><li><details><summary class="dsum"><span><b style="margin:0;font-size:16px">12. Important</b></span></summary><div class="dbody"><ol class="man"><li>All your data is saved <b>on this phone only</b>. Do not clear the browser’s data or history.</li><li>Tap <b>Back up data</b> (Menu tab) every few days, and keep the file safe.</li><li>To use another phone, open the link there and tap <b>Restore data</b> with your backup file.</li><li><b>Delete test sales and stock history</b> erases all sales and stock records. Only use it before you start for real.</li></ol></div></details></li></ul></div>';
     if (!items.length) return h + '<div class="empty"><b>No menu items yet</b></div>';
     var groups = [], seen = {};
     items.forEach(function (m) { var c = m.cat || "Other"; if (!seen[c]) { seen[c] = []; groups.push(c); } seen[c].push(m); });
@@ -1008,10 +1015,88 @@ summary { font-weight: 700; cursor: pointer; min-height: 32px; }
     S.dl.save({ filename: "tapsihan-sales-" + r.a + (r.a === r.b ? "" : "_to_" + r.b) + ".csv", data: out.join("\n") }).then(function () { toast("Saved"); }).catch(function (e) { if (!e || e.code !== "declined") toast("Download is not available here.", true); });
   }
 
+  /* ---------- CLOSE ---------- */
+  function closeRec(key) { return S.closes.filter(function (c) { return c.date === key; })[0]; }
+  function isClosedDay(key) { return !!closeRec(key); }
+  function renderClose() {
+    if (!allLoaded()) return '<div class="empty"><b>Loading…</b></div>';
+    var ws = workStart(), key = dstr(ws), d1 = dayMs(key, 1) - 1, isToday = key === todayStr();
+    var rows = salesBetween(ws, d1 + 1), cl = closeRec(key);
+    var total = rows.reduce(function (a, s) { return a + s.total; }, 0);
+    var cash = rows.filter(function (s) { return s.pay !== "gcash"; }).reduce(function (a, s) { return a + s.total; }, 0), gcash = total - cash;
+    var disc = rows.reduce(function (a, s) { return a + (s.discount || 0); }, 0);
+    var h = "";
+    if (cl) h += '<div class="note info"><b>Closed</b> at ' + timeStr(cl.at || cl.ts) + '. Salamat po! <button class="btn small" data-act="reopen" type="button">Reopen shop</button></div>';
+    h += '<h2 class="sec">Summary · ' + esc(dlabel(ws)) + '</h2>';
+    h += '<div class="stats"><div class="stat"><small>Sales</small><b>' + money(total) + '</b><span>' + rows.length + (rows.length === 1 ? " order" : " orders") + (disc > 0 ? " · " + money(disc) + " discounts" : "") + '</span></div>' +
+      '<div class="stat"><small>Cash</small><b>' + money(cash) + '</b><span>GCash ' + money(gcash) + '</span></div></div>';
+    var agg = {};
+    rows.forEach(function (s) { (s.lines || []).forEach(function (l) { var a = agg[l.id] || (agg[l.id] = { name: l.name, qty: 0, rev: 0 }); a.qty += l.qty; a.rev += l.qty * l.price - (l.off || 0); }); });
+    var rank = Object.keys(agg).map(function (k) { return agg[k]; }).sort(function (a, b) { return b.qty - a.qty || b.rev - a.rev; }).slice(0, 5);
+    h += '<h2 class="sec">Best sellers</h2>';
+    if (!rank.length) h += '<div class="panel"><div class="empty">No sales yet.</div></div>';
+    else { var mx = rank[0].qty; h += '<div class="panel rank">' + rank.map(function (x) { return '<div class="r"><span class="r-name">' + esc(x.name) + '</span><span class="r-val">' + x.qty + " sold · " + money(x.rev) + '</span><span class="r-bar"><i style="width:' + Math.round(x.qty / mx * 100) + '%"></i></span></div>'; }).join("") + "</div>"; }
+    var before = ledgerAt(S.events, ws - 1), end = isToday ? { on: S.derived.onHand, touched: S.derived.touched } : ledgerAt(S.events, d1);
+    var added = {}, wasted = {}, sold = {};
+    S.moves.forEach(function (m) { if (m.ts < ws || m.ts > d1) return; if (m.kind === "delivery") added[m.stockId] = (added[m.stockId] || 0) + m.qty; if (m.kind === "waste") wasted[m.stockId] = (wasted[m.stockId] || 0) - m.qty; });
+    rows.forEach(function (s) { (s.lines || []).forEach(function (l) { var u = l.use || {}; for (var k in u) sold[k] = (sold[k] || 0) + u[k] * l.qty; }); });
+    var items = S.stock.slice().sort(byOrder), gs = [], gm = {};
+    items.forEach(function (st) {
+      if (!end.touched[st.id] && !added[st.id] && !sold[st.id] && !wasted[st.id]) return;
+      var c = st.cat || "Other"; if (!gm[c]) { gm[c] = []; gs.push(c); } gm[c].push(st);
+    });
+    h += '<h2 class="sec">Stock today</h2>';
+    if (!gs.length) h += '<div class="panel"><div class="empty">No stock entered yet.</div></div>';
+    gs.forEach(function (g) {
+      h += '<p class="s-sub" style="margin:10px 2px 6px;font-weight:700">' + esc(g) + '</p><div class="panel"><ul class="list">';
+      gm[g].forEach(function (st) {
+        var id = st.id, stocked = (before.touched[id] ? before.on[id] : 0) + (added[id] || 0), left = end.on[id];
+        h += '<li class="srow"><div class="s-top"><div><div class="s-name">' + esc(st.name) + '</div><div class="s-sub">Stocked ' + qf(stocked) + ' · Sold ' + qf(sold[id] || 0) + ' · Sira ' + qf(wasted[id] || 0) + '</div></div>' +
+          '<div class="s-qty"><span class="s-sub">Tira</span><b class="' + (left < 0 ? "neg" : "") + '">' + (end.touched[id] ? qf(left) : "—") + '</b></div></div></li>';
+      });
+      h += "</ul></div>";
+    });
+    if (!cl) {
+      h += '<h2 class="sec">Closing: count what is left (Tira)</h2><div class="panel"><ul class="list">';
+      var any = false;
+      items.forEach(function (st) {
+        var t = end.touched[st.id], val = S.tira[st.id] !== undefined ? S.tira[st.id] : (t ? qf(end.on[st.id]) : "");
+        any = true;
+        h += '<li><div class="cline"><div><div class="c-name">' + esc(st.name) + '</div><div class="c-sub">' + (t ? "App says " + qf(end.on[st.id]) : "No stock yet") + " " + esc(st.unit || "pc") + '</div></div><input class="tiraIn" inputmode="decimal" data-id="' + esc(st.id) + '" value="' + esc(val) + '" aria-label="Tira ' + esc(st.name) + '"></div></li>';
+      });
+      h += "</ul></div>";
+      h += '<p class="s-sub" style="margin:8px 2px">Change any number to what you really counted. Leave it blank to skip that item.</p>';
+      h += '<button class="btn primary" style="width:100%;margin-top:6px" data-act="close-shop" type="button"' + (any ? "" : " disabled") + '>' + (S.closeArm ? "Tap again to close the shop" : "Close shop for " + (isToday ? "today" : dlabel(ws))) + '</button>';
+    }
+    return h;
+  }
+  function closeShop() {
+    if (!guardWrite()) return;
+    var ts = stamp(), key = dstr(ts), ref = ledgerAt(S.events, ts), recs = [], bad = false;
+    S.stock.forEach(function (st) {
+      var raw = S.tira[st.id]; if (raw === undefined || String(raw).trim() === "") return;
+      var q = parseNum(raw); if (!(q >= 0)) { bad = true; return; }
+      var cur = ref.on[st.id] || 0;
+      if (ref.touched[st.id] && num(q - cur) === 0) return;
+      recs.push({ ts: ts, at: Date.now(), stockId: st.id, qty: num(q - cur), kind: "adjust", note: "Closing tira", counted: q });
+    });
+    if (bad) { toast("Tira must be numbers, 0 or more.", true); return; }
+    var rows = salesBetween(dayMs(key, 0), dayMs(key, 1)), total = rows.reduce(function (a, s) { return a + s.total; }, 0);
+    var cash = rows.filter(function (s) { return s.pay !== "gcash"; }).reduce(function (a, s) { return a + s.total; }, 0);
+    recs.forEach(function (r) { S.db.collection("moves").add(r).catch(fail); });
+    S.db.doc("closes/c" + key).set({ date: key, ts: ts, at: Date.now(), total: total, orders: rows.length, cash: cash, gcash: num(total - cash) }).catch(fail);
+    S.tira = {}; S.closeArm = false; toast("Shop closed. Salamat!");
+  }
+  function reopenShop() {
+    if (!guardWrite()) return;
+    var c = closeRec(dstr(workStart())); if (!c) return;
+    S.db.doc("closes/" + c.id).delete().catch(fail); toast("Shop reopened");
+  }
+
   /* ---------- render ---------- */
   function renderAll() {
     derive(); renderHeader(); renderBanner();
-    var v = S.tab === "sell" ? renderSell() : S.tab === "stock" ? renderStock() : S.tab === "reports" ? renderReports() : renderMenu();
+    var v = S.tab === "sell" ? renderSell() : S.tab === "stock" ? renderStock() : S.tab === "reports" ? renderReports() : S.tab === "close" ? renderClose() : renderMenu();
     $("#view").innerHTML = v;
     $$(".tabbar [data-tab]").forEach(function (b) { if (b.dataset.tab === S.tab) b.setAttribute("aria-current", "page"); else b.removeAttribute("aria-current"); });
     renderCartBar();
@@ -1045,7 +1130,7 @@ summary { font-weight: 700; cursor: pointer; min-height: 32px; }
   function doReset() {
     if ($("#resetIn").value.trim().toUpperCase() !== "RESET") { toast("Type RESET to confirm.", true); return; }
     if (!guardWrite()) return;
-    var jobs = S.sales.map(function (s) { return "sales/" + s.id; }).concat(S.moves.map(function (m) { return "moves/" + m.id; }));
+    var jobs = S.sales.map(function (s) { return "sales/" + s.id; }).concat(S.moves.map(function (m) { return "moves/" + m.id; })).concat(S.closes.map(function (c) { return "closes/" + c.id; }));
     closeSheet(); S.cart = {}; S.cash = 0; toast("Deleting " + jobs.length + " records…");
     (async function () {
       for (var i = 0; i < jobs.length; i += 10) await Promise.all(jobs.slice(i, i + 10).map(function (p) { return S.db.doc(p).delete(); }));
@@ -1058,10 +1143,12 @@ summary { font-weight: 700; cursor: pointer; min-height: 32px; }
     var b = e.target.closest("[data-act]"); if (!b) return;
     var a = b.dataset.act, id = b.dataset.id;
     switch (a) {
-      case "tab": S.tab = b.dataset.tab; S.voidArm = null; S.undoArm = null; window.scrollTo(0, 0); renderAll(); break;
+      case "tab": S.tab = b.dataset.tab; S.closeArm = false; S.tira = {}; S.voidArm = null; S.undoArm = null; window.scrollTo(0, 0); renderAll(); break;
       case "jump": var gt = document.getElementById("grp-" + b.dataset.g); if (gt) gt.scrollIntoView({ block: "start" }); break;
-      case "add": S.cart[id] = (S.cart[id] || 0) + 1; renderAll(); break;
+      case "add": if (isClosedDay(dstr(workStart()))) { toast("The shop is closed. Reopen it on the Close tab.", true); break; } S.cart[id] = (S.cart[id] || 0) + 1; renderAll(); break;
       case "dec": if (S.cart[id] > 1) S.cart[id]--; else { delete S.cart[id]; delete S.mods[id]; } renderAll(); break;
+      case "close-shop": if (!S.closeArm) { S.closeArm = true; renderAll(); break; } S.closeArm = false; closeShop(); break;
+      case "reopen": reopenShop(); break;
       case "open-cart": showCart(); break;
       case "mod": var mo2 = S.mods[id] || (S.mods[id] = { nr: 0, ne: 0 }), kk = b.dataset.k, q2 = S.cart[id] || 0; mo2[kk] = Math.max(0, Math.min(q2, Math.min(mo2[kk] || 0, q2) + (+b.dataset.d))); renderAll(); refreshCartSheet(); break;
       case "cinc": S.cart[id] = (S.cart[id] || 0) + 1; renderAll(); refreshCartSheet(); break;
@@ -1113,6 +1200,7 @@ summary { font-weight: 700; cursor: pointer; min-height: 32px; }
     }
   });
   document.addEventListener("input", function (e) {
+    if (e.target.classList && e.target.classList.contains("tiraIn")) { S.tira[e.target.dataset.id] = e.target.value; if (S.closeArm) { S.closeArm = false; var cb = $('[data-act="close-shop"]'); if (cb) cb.textContent = "Close shop for today"; } }
     if (e.target.id === "cashIn") { S.cash = parseNum(e.target.value) || 0; updateChange(); }
     if (e.target.id === "discIn") {
       S.disc = Math.max(parseNum(e.target.value) || 0, 0);
@@ -1148,7 +1236,7 @@ summary { font-weight: 700; cursor: pointer; min-height: 32px; }
     }
     if (!db) { renderAll(); return; }
     var timer = setTimeout(function () { S.slow = true; renderAll(); }, 10000);
-    ["menu", "stock", "sales", "moves"].forEach(function (name) {
+    ["menu", "stock", "sales", "moves", "closes"].forEach(function (name) {
       db.collection(name).onSnapshot(function (snap) {
         S[name] = snap.docs.map(function (d) { var o = Object.assign({}, d.data()); o.id = d.id; return o; });
         S.loaded[name] = true;

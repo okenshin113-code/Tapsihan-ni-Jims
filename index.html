@@ -321,7 +321,7 @@ summary { font-weight: 700; cursor: pointer; min-height: 32px; }
   <div class="wrap">
     <div class="brand">
       <h1>Tapsihan ni Jim's</h1>
-      <div class="brandrow"><button type="button" class="datebtn" id="datebtn" data-act="open-date" aria-label="Change the date for new entries"></button><button type="button" class="calcbtn" data-act="open-calc" aria-label="Calculator"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="3" width="14" height="18" rx="2"/><path d="M8 7h8M8 11h.01M12 11h.01M16 11h.01M8 15h.01M12 15h.01M16 15h.01M8 18h.01M12 18h.01M16 18h.01"/></svg></button></div>
+      <div class="brandrow"><button type="button" class="datebtn" id="datebtn" data-act="open-date" aria-label="Change the date for new entries"></button><button type="button" class="calcbtn" data-act="open-calc" aria-label="Calculator"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="3" width="14" height="18" rx="2"/><path d="M8 7h8M8 11h.01M12 11h.01M16 11h.01M8 15h.01M12 15h.01M16 15h.01M8 18h.01M12 18h.01M16 18h.01"/></svg></button><button type="button" class="calcbtn" data-act="open-assist" aria-label="Help assistant" style="margin-left:6px;font-weight:700;font-size:13px">Help</button></div>
     </div>
     <div class="today" aria-live="polite">
       <small id="todayLabel">Today</small>
@@ -901,6 +901,312 @@ summary { font-weight: 700; cursor: pointer; min-height: 32px; }
     closeSheet(); toast(inName ? who + " → " + inName + ". Handover saved." : who + " ended the shift."); renderAll();
   }
 
+
+  /* ---------- egg & rice summary ----------
+     Combo = comes with a dish. Solo = ordered by itself as an extra (the Egg or Rice item). */
+  function riceStock() { return S.stock.filter(function (x) { return /^rice$/i.test(x.name); })[0] || null; }
+  function eggRiceTotals(rows) {
+    var t = { eggCombo: 0, eggSolo: 0, eggNone: 0, riceCombo: 0, riceSolo: 0, riceNone: 0 }, eg = eggStock(), rc = riceStock();
+    rows.forEach(function (sl) {
+      (sl.lines || []).forEach(function (l) {
+        var u = lineUseAbs(l), isEgg = /^egg/i.test(l.name) || (eg && (l.use || {})[eg.id] > 0 && l.extra), isRice = /^rice$/i.test(l.name) || (rc && (l.use || {})[rc.id] > 0 && l.extra);
+        if (l.extra) { if (isEgg) t.eggSolo += eg ? (u[eg.id] || l.qty) : l.qty; if (isRice) t.riceSolo += rc ? (u[rc.id] || l.qty) : l.qty; return; }
+        var m = S.menu.filter(function (x) { return x.id === l.id; })[0];
+        if (eg) t.eggCombo += u[eg.id] || 0; else if (!m || mEgg(m)) t.eggCombo += Math.max(0, l.qty - (l.ne || 0));
+        if (!m || mRice(m)) t.riceCombo += Math.max(0, l.qty - (l.nr || 0));
+        t.eggNone += l.ne || 0; t.riceNone += l.nr || 0;
+      });
+    });
+    for (var k in t) t[k] = num(t[k]);
+    return t;
+  }
+  function eggRicePanel(rows) {
+    var t = eggRiceTotals(rows);
+    if (!(t.eggCombo + t.eggSolo + t.riceCombo + t.riceSolo)) return "";
+    function card(name, combo, solo, none) {
+      return '<div class="stat"><small>' + name + ' sold</small><b>' + qf(combo + solo) + '</b><span>Combo ' + qf(combo) + ' · Solo ' + qf(solo) + '</span>' + (none > 0 ? '<br><span>' + qf(none) + ' order' + (none === 1 ? '' : 's') + ' without ' + name.toLowerCase() + '</span>' : '') + '</div>';
+    }
+    return '<h2 class="sec">Egg and rice sold</h2><div class="stats">' + card("Egg", t.eggCombo, t.eggSolo, t.eggNone) + card("Rice", t.riceCombo, t.riceSolo, t.riceNone) + '</div><p class="s-sub" style="margin:8px 2px 0"><b>Combo</b> = comes with a dish. <b>Solo</b> = ordered by itself (Egg or Rice on the menu).</p>';
+  }
+
+  /* ---------- Assistant: read the tindera's paper, compare, find what is wrong ---------- */
+  var AI_MODEL = "claude-sonnet-4-6";
+  S.as = { img: "", who: "", date: "", busy: false, res: null, items: [], stock: [], prev: "", err: "", armIns: false, armStock: false };
+  function aiKey() { try { return localStorage.getItem("tapsihan_apikey") || ""; } catch (e) { return ""; } }
+  function asDate() { return S.as.date || dstr(workStart()); }
+  function paperSales() {
+    var d = asDate(), who = S.as.who;
+    return salesBetween(dparse(d), dayMs(d, 1)).filter(function (x) { return !who || x.by === who; });
+  }
+  function appQtyById(rows) { var o = {}; rows.forEach(function (sl) { (sl.lines || []).forEach(function (l) { if (l.id === "paper-utang") return; o[l.id] = (o[l.id] || 0) + l.qty; }); }); return o; }
+  function menuById(id) { return S.menu.filter(function (m) { return m.id === id; })[0]; }
+  function asCompare() {
+    var A = S.as, rows = paperSales(), app = appQtyById(rows), paper = {}, probs = [], unknown = [];
+    A.items.forEach(function (it) {
+      var q = Number(it.qty) || 0;
+      if (it.tira !== undefined && it.tira !== null && it.id && menuById(it.id)) {
+        var mm = menuById(it.id), uk = Object.keys(mm.use || {}), k0 = uk.length === 1 && mm.use[uk[0]] === 1 ? uk[0] : null;
+        if (k0 && stockById(k0)) {
+          var d0 = asDate(), a0 = dparse(d0), b0 = dayMs(d0, 1), bef = ledgerAt(S.events, a0 - 1), avail = (bef.touched[k0] ? bef.on[k0] : 0);
+          S.moves.forEach(function (mv) { if (mv.stockId === k0 && mv.ts >= a0 && mv.ts < b0 && (mv.kind === "delivery" || mv.kind === "waste")) avail += Number(mv.qty) || 0; });
+          if (avail > 0) {
+            var should = num(avail - q);
+            if (should !== it.tira) probs.push({ lvl: "bad", text: mm.name + ": stock was " + qf(avail) + ", paper sold " + qf(q) + ", so tira should be " + qf(should) + " but paper says " + qf(it.tira) + (it.tira < should ? " (" + qf(num(should - it.tira)) + " missing)." : " (" + qf(num(it.tira - should)) + " extra).") });
+          }
+        }
+      }
+      if (!(q > 0)) return;
+      if (!it.id || !menuById(it.id)) { unknown.push(it); probs.push({ lvl: "warn", text: "“" + (it.text || "?") + "” (" + qf(q) + ") is not on your menu. Match it or add it to the Menu tab." }); return; }
+      paper[it.id] = (paper[it.id] || 0) + q;
+      var m = menuById(it.id), pr = it.price;
+      if (typeof pr === "number" && Math.abs(pr - Number(m.price)) > 0.5) probs.push({ lvl: "warn", text: m.name + ": paper price " + money(pr) + " but menu price is " + money(m.price) + "." });
+      if (typeof pr === "number" && typeof it.amount === "number" && Math.abs(pr * q - it.amount) > 0.5) probs.push({ lvl: "bad", text: m.name + ": paper line does not add up (" + qf(q) + " × " + money(pr) + " is " + money(pr * q) + ", paper says " + money(it.amount) + ")." });
+    });
+    var ids = {}; Object.keys(paper).forEach(function (k) { ids[k] = 1; }); Object.keys(app).forEach(function (k) { ids[k] = 1; });
+    var lines = Object.keys(ids).map(function (k) {
+      var m = menuById(k), nm = m ? m.name : ((rows.map(function (x) { return (x.lines || []).filter(function (l) { return l.id === k; })[0]; }).filter(Boolean)[0] || {}).name || "(removed)");
+      return { id: k, name: nm, paper: paper[k] || 0, app: app[k] || 0, diff: num((paper[k] || 0) - (app[k] || 0)), price: m ? Number(m.price) : 0, order: m ? (m.order || 0) : 999 };
+    }).sort(function (a, b) { return a.order - b.order; });
+    lines.forEach(function (l) {
+      if (l.diff > 0) probs.push({ lvl: "bad", text: l.name + ": paper has " + qf(l.paper) + " but the app has only " + qf(l.app) + ". Missing " + qf(l.diff) + " in the app." });
+      else if (l.diff < 0) probs.push({ lvl: "bad", text: l.name + ": the app has " + qf(l.app) + " but the paper shows " + qf(l.paper) + ". " + qf(-l.diff) + " extra in the app." });
+    });
+    var sumLines = num(lines.reduce(function (a, l) { return a + l.paper * l.price; }, 0)), ptot = A.res && typeof A.res.paper_total === "number" ? A.res.paper_total : null;
+    var appTotal = num(rows.reduce(function (a, x) { return a + x.total; }, 0));
+    if (ptot !== null && Math.abs(ptot - sumLines) > 0.5 && !unknown.length) probs.push({ lvl: "bad", text: "Paper total is " + money(ptot) + " but the items on it add up to " + money(sumLines) + " (difference " + money(num(ptot - sumLines)) + ")." });
+    if (ptot !== null && Math.abs(ptot - appTotal) > 0.5) probs.push({ lvl: "bad", text: "Paper total " + money(ptot) + " vs app total " + money(appTotal) + ": " + (ptot > appTotal ? "app is short " : "app is over ") + money(Math.abs(num(ptot - appTotal))) + "." });
+    if (A.who) { var nob = salesBetween(dparse(asDate()), dayMs(asDate(), 1)).filter(function (x) { return !x.by; }).length; if (nob) probs.push({ lvl: "warn", text: nob + " app order" + (nob === 1 ? "" : "s") + " that day have no tindera name, so they are not counted here." }); }
+    ((A.res && A.res.notes) || []).forEach(function (n) { probs.push({ lvl: "warn", text: "Paper: " + n }); });
+    return { lines: lines, probs: probs, appTotal: appTotal, sumLines: sumLines, ptot: ptot, orders: rows.length };
+  }
+  function asHtml() {
+    var A = S.as, key = aiKey(), h = '<h2>Help assistant</h2><p class="lead">Send a photo of the tindera’s paper. The assistant reads it, checks it against the app, and tells you what is wrong.</p>';
+    if (!key && !A.manual) {
+      return h + '<button class="btn primary" type="button" style="width:100%;margin-bottom:12px" data-act="as-manual">No API key? Type the paper myself (free)</button>' + '<label class="field"><span>Or paste the paper lines <span class="hint">(one per line, like “Tapsilog 3” or “Tapsilog 3/13” for sold/tira)</span></span><textarea id="asPaste" rows="5" style="width:100%;font:inherit;padding:8px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink)"></textarea></label><button class="btn" type="button" style="width:100%;margin-bottom:12px" data-act="as-paste">Fill in from pasted lines</button>' + '<div class="note info">Or set up the photo reader: one-time setup: paste your Anthropic API key. It is saved on this phone only and is used only to read the photo.</div><label class="field"><span>API key</span><input id="asKey" autocomplete="off" autocapitalize="off" placeholder="sk-ant-..."></label>' +
+        '<div class="actions"><button class="btn" data-act="close" type="button">Cancel</button><button class="btn primary" data-act="as-key-save" type="button">Save key</button></div>';
+    }
+    h += '<div class="row2"><label class="field"><span>Date of the paper</span><input id="asDate" type="date" max="' + todayStr() + '" value="' + esc(asDate()) + '"></label>' +
+      '<label class="field"><span>Whose paper?</span><select id="asWho"><option value="">All / not sure</option>' + S.staff.map(function (n) { return '<option value="' + esc(n) + '"' + (A.who === n ? " selected" : "") + '>' + esc(n) + '</option>'; }).join("") + '</select></label></div>';
+    if (key) {
+      h += '<input type="file" id="asFile" accept="image/*" hidden>';
+      h += '<div style="display:flex;gap:10px;align-items:center;margin:4px 0 12px"><button class="btn" type="button" data-act="as-pick">' + (A.img ? "Change photo" : "Take or choose photo") + '</button>' + (A.img ? '<img src="' + A.img + '" alt="Paper" style="height:64px;border-radius:6px;border:1px solid var(--line)">' : '<span class="s-sub">No photo yet</span>') + '</div>';
+      h += '<button class="btn primary" type="button" style="width:100%" data-act="as-read"' + (A.img && !A.busy ? "" : " disabled") + '>' + (A.busy ? "Reading the paper…" : (A.res ? "Read again" : "Read the paper")) + '</button>';
+    }
+    if (!A.res) h += '<button class="btn" type="button" style="width:100%;margin-top:' + (key ? "10px" : "4px") + '" data-act="as-manual">Type the paper myself (free)</button>' +
+      '<label class="field" style="margin-top:14px"><span>Or paste the paper lines <span class="hint">(one per line, like “Tapsilog 3” or “Tapsilog 3/13” for sold/tira)</span></span><textarea id="asPaste" rows="5" style="width:100%;font:inherit;padding:8px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink)"></textarea></label><button class="btn" type="button" style="width:100%" data-act="as-paste">Fill in from pasted lines</button>';
+    if (A.err) h += '<div class="note" style="margin-top:12px">' + esc(A.err) + '</div>';
+    if (A.res) {
+      var cmp = asCompare(), menu = S.menu.slice().sort(byOrder);
+      h += '<h3 style="margin:18px 0 6px;font-size:16px">What the paper says</h3><label class="field"><span>Total written on the paper (₱) <span class="hint">(optional)</span></span><input id="asTotal" inputmode="decimal" value="' + (A.res.paper_total !== null && A.res.paper_total !== undefined ? esc(A.res.paper_total) : "") + '"></label><div class="panel"><ul class="list">';
+      A.items.forEach(function (it, i) {
+        h += '<li><div class="cline" style="align-items:flex-start;gap:8px"><div style="flex:1;min-width:0"><div class="c-sub">“' + esc(it.text || "") + '”' + (typeof it.price === "number" ? " · " + money(it.price) : "") + (typeof it.tira === "number" ? " · tira " + qf(it.tira) : "") + '</div><select data-as="match" data-i="' + i + '" style="width:100%;min-height:42px"><option value="">Not on the menu</option>' +
+          menu.map(function (m) { return '<option value="' + esc(m.id) + '"' + (it.id === m.id ? " selected" : "") + '>' + esc(m.name) + ' · ' + money(m.price) + '</option>'; }).join("") + '</select></div>' +
+          '<input class="tiraIn" inputmode="decimal" data-as="qty" data-i="' + i + '" value="' + esc(it.qty) + '" aria-label="Quantity" style="width:70px"><button class="btn small" type="button" data-act="as-del" data-i="' + i + '" aria-label="Remove line">✕</button></div></li>';
+      });
+      h += '</ul></div><p style="margin:8px 0 0"><button class="btn small" type="button" data-act="as-add">+ Add a line</button></p>';
+      if (A.stock && A.stock.length) {
+        var todo = A.stock.filter(function (r) { var k = asStockKey(r.id); return k && !asStockDone(k); }).length;
+        h += '<h3 style="margin:18px 0 6px;font-size:16px">Opening stock on the paper</h3><p class="s-sub" style="margin:0 0 6px">' + esc(A.prev || "Last tindera") + '’s tira + dagdag (added), before ' + esc(dlabel(dparse(asDate()))) + '.</p><div class="panel rank">' + A.stock.map(function (r) {
+          var k = asStockKey(r.id), chip = !r.id ? '<span class="chip warn">Not on menu</span>' : !k ? '<span class="chip warn">Can’t track</span>' : asStockDone(k) ? '<span class="chip ok">Entered</span>' : "";
+          return '<div class="r"><span class="r-name">' + esc(r.id ? (menuById(r.id) || {}).name : r.text) + '</span><span class="r-val">tira ' + qf(r.open) + ' + dagdag ' + qf(r.add) + ' = ' + qf(r.open + r.add) + ' ' + chip + '</span></div>';
+        }).join("") + '</div>';
+        if (todo) h += '<button class="btn primary" type="button" style="width:100%;margin-top:10px" data-act="as-stock">' + (A.armStock ? "Tap again to enter " + todo + " items of stock" : "Enter this opening stock into the app") + '</button>';
+      }
+      if ((A.nakuha && A.nakuha.length) || A.sahod > 0 || (A.pautang && A.pautang.length)) {
+        var dd = asDate(), othTodo = (A.nakuha || []).filter(function (x, k) { return !asOtherDone("paper-" + dd + "-" + k); }).length + (A.sahod > 0 && !asOtherDone("sahod-" + dd) ? 1 : 0);
+        h += '<h3 style="margin:18px 0 6px;font-size:16px">Pautang, nakuha and sahod</h3><div class="panel rank">';
+        (A.pautang || []).forEach(function (p) { h += '<div class="r"><span class="r-name">Pautang · ' + esc(p.who) + '</span><span class="r-val">' + money(p.amount) + '</span></div>'; });
+        (A.nakuha || []).forEach(function (x, k) { h += '<div class="r"><span class="r-name">Nakuha · ' + esc(x.label) + '</span><span class="r-val">' + money(x.amount) + (asOtherDone("paper-" + dd + "-" + k) ? ' <span class="chip ok">Entered</span>' : '') + '</span></div>'; });
+        if (A.sahod > 0) h += '<div class="r"><span class="r-name">Sahod</span><span class="r-val">' + money(A.sahod) + (asOtherDone("sahod-" + dd) ? ' <span class="chip ok">Entered</span>' : '') + '</span></div>';
+        h += '</div>';
+        if (othTodo) h += '<button class="btn primary" type="button" style="width:100%;margin-top:10px" data-act="as-others">' + (A.armOth ? "Tap again to enter nakuha and sahod" : "Enter nakuha and sahod into the app") + '</button>';
+        if (A.pautang && A.pautang.length) h += '<p class="s-sub" style="margin:6px 2px 0">Pautang is entered as utang (see the Money tab) when you tap “Add the missing items to the app” below. It is taken out of that cash sale, so the total stays the same.</p>';
+      }
+      h += '<h3 style="margin:18px 0 6px;font-size:16px">Paper vs app · ' + esc(dlabel(dparse(asDate()))) + (A.who ? " · " + esc(A.who) : "") + '</h3>';
+      h += '<div class="stats"><div class="stat"><small>Paper total</small><b>' + (cmp.ptot !== null ? money(cmp.ptot) : "—") + '</b><span>Items add up to ' + money(cmp.sumLines) + '</span></div><div class="stat"><small>App total</small><b>' + money(cmp.appTotal) + '</b><span>' + cmp.orders + ' orders</span></div></div>';
+      if (cmp.lines.length) {
+        h += '<div class="panel rank" style="margin-top:10px">' + cmp.lines.map(function (l) {
+          return '<div class="r"><span class="r-name">' + esc(l.name) + '</span><span class="r-val">Paper ' + qf(l.paper) + ' · App ' + qf(l.app) + ' ' + (l.diff === 0 ? '<span class="chip ok">OK</span>' : '<span class="chip bad">' + (l.diff > 0 ? "+" : "") + qf(l.diff) + '</span>') + '</span></div>';
+        }).join("") + '</div>';
+      }
+      h += '<h3 style="margin:18px 0 6px;font-size:16px">Problems found</h3>';
+      if (!cmp.probs.length) h += '<div class="note info">Nothing wrong. The paper and the app match. ✓</div>';
+      else h += '<div class="panel"><ul class="list">' + cmp.probs.map(function (p) { return '<li><div style="padding:10px 12px"><span class="chip ' + p.lvl + '">' + (p.lvl === "bad" ? "Check" : "Note") + '</span> ' + esc(p.text) + '</div></li>'; }).join("") + '</ul></div>';
+      var miss = cmp.lines.filter(function (l) { return l.diff > 0 && menuById(l.id); }), mv = num(miss.reduce(function (a, l) { return a + l.diff * l.price; }, 0));
+      if (miss.length) {
+        h += '<button class="btn primary" type="button" style="width:100%;margin-top:14px" data-act="as-insert">' + (A.armIns ? "Tap again to add " + qf(miss.reduce(function (a, l) { return a + l.diff; }, 0)) + " items (" + money(mv) + ")" : "Add the missing items to the app") + '</button><p class="s-sub" style="margin:6px 2px 0">Adds one cash sale with the missing items, marked “From paper”. Stock goes down for them.</p>';
+      }
+    }
+    h += '<div class="actions"><button class="btn" data-act="as-reset" type="button">Start over</button><button class="btn" data-act="close" type="button">Close</button></div>';
+    h += '<p class="s-sub" style="margin:12px 2px 0"><button class="btn small" type="button" data-act="as-key-clear">Change API key</button></p>';
+    return h;
+  }
+  function openAssist() {
+    S.sheet = { type: "assist" };
+    var sp = $(".sheet-panel"), top = sp && S.sheet.type === "assist" ? sp.scrollTop : 0;
+    openSheet(asHtml()); var n = $(".sheet-panel"); if (n) n.scrollTop = top;
+  }
+  function refreshAssist() { if (S.sheet && S.sheet.type === "assist") openAssist(); }
+  function asPhoto(file) {
+    var fr = new FileReader();
+    fr.onload = function () {
+      var im = new Image();
+      im.onload = function () {
+        var sc = Math.min(1, 1600 / Math.max(im.width, im.height)), c = document.createElement("canvas");
+        c.width = Math.round(im.width * sc); c.height = Math.round(im.height * sc);
+        c.getContext("2d").drawImage(im, 0, 0, c.width, c.height);
+        S.as.img = c.toDataURL("image/jpeg", 0.85); S.as.res = null; S.as.items = []; S.as.err = ""; refreshAssist();
+      };
+      im.onerror = function () { S.as.err = "That file could not be opened as a photo."; refreshAssist(); };
+      im.src = fr.result;
+    };
+    fr.readAsDataURL(file);
+  }
+  async function asRead() {
+    var A = S.as, key = aiKey(); if (!A.img || A.busy) return;
+    A.busy = true; A.err = ""; A.armIns = false; refreshAssist();
+    var menu = S.menu.filter(function (m) { return m.active !== false; }).sort(byOrder).map(function (m) { return m.id + " | " + m.name + " | " + m.price; }).join("\n");
+    var prompt = "This is a photo of a handwritten (or printed) sales paper from a small Filipino tapsilog eatery. Read every sold item line.\nMenu (id | name | price):\n" + menu +
+      "\n\nReturn ONLY a JSON object, no markdown, in this shape:\n{\"items\":[{\"text\":\"as written\",\"menu_id\":\"id from the menu or null if not sure\",\"qty\":number,\"price\":number or null,\"amount\":number or null}],\"paper_total\":number or null,\"notes\":[\"short notes\"]}\nRules: include every line you can see. Tally marks mean a count. Understand shorthand (tapsi = Tapsilog, toci = Tocilog, etc). Never guess a quantity: if it is unclear, give your best reading and add a note. Put crossed-out lines, unreadable writing, or totals that look changed in notes. paper_total is the grand total written on the paper, if any.";
+    try {
+      var r = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-api-key": key, "anthropic-version": "2023-06-01", "anthropic-dangerous-direct-browser-access": "true" },
+        body: JSON.stringify({ model: AI_MODEL, max_tokens: 2000, messages: [{ role: "user", content: [{ type: "image", source: { type: "base64", media_type: "image/jpeg", data: A.img.split(",")[1] } }, { type: "text", text: prompt }] }] })
+      });
+      if (r.status === 401) throw new Error("The API key was not accepted. Tap “Change API key” and paste it again.");
+      if (!r.ok) throw new Error("The assistant could not answer right now (error " + r.status + "). Try again in a moment.");
+      var data = await r.json(), txt = (data.content || []).map(function (c) { return c.type === "text" ? c.text : ""; }).join("");
+      var a = txt.indexOf("{"), b = txt.lastIndexOf("}"); if (a < 0 || b < a) throw new Error("The assistant’s answer was not readable. Try a clearer photo.");
+      var res = JSON.parse(txt.slice(a, b + 1));
+      A.res = { paper_total: typeof res.paper_total === "number" ? res.paper_total : null, notes: Array.isArray(res.notes) ? res.notes.map(String) : [] };
+      A.items = (Array.isArray(res.items) ? res.items : []).map(function (x) { return { text: String(x.text || ""), id: x.menu_id && menuById(String(x.menu_id)) ? String(x.menu_id) : "", qty: Number(x.qty) || 0, price: typeof x.price === "number" ? x.price : null, amount: typeof x.amount === "number" ? x.amount : null }; });
+    } catch (e) {
+      A.err = (e && e.message && !/Failed to fetch|NetworkError|Load failed/i.test(e.message)) ? e.message : "No internet, or the assistant could not be reached.";
+    }
+    A.busy = false; refreshAssist();
+  }
+  function asParse(text) {
+    var A = S.as; A.sahod = null; A.nakuha = []; A.pautang = []; var items = [], stock = [], mode = "sold", total = null, norm = function (x) { return String(x).toLowerCase().replace(/[^a-z0-9]+/g, ""); };
+    String(text || "").split(/\r?\n/).forEach(function (ln) {
+      ln = ln.trim(); if (!ln) return;
+      var m;
+      if ((m = /^date\s*[:=]\s*(\d{4}-\d{2}-\d{2})/i.exec(ln))) { A.date = m[1]; return; }
+      if ((m = /^(?:tindera|who)\s*[:=]\s*(.+)$/i.exec(ln))) { var w = S.staff.filter(function (n) { return norm(n) === norm(m[1]); })[0]; if (w) A.who = w; return; }
+      if ((m = /^prev(?:ious)?\s*[:=]\s*(.+)$/i.exec(ln))) { var pw = S.staff.filter(function (n) { return norm(n) === norm(m[1]); })[0]; A.prev = pw || m[1].trim(); return; }
+      if ((m = /^sahod\s*[:=]\s*([\d,\.]+)\s*$/i.exec(ln))) { var shv = parseNum(m[1]); if (isFinite(shv) && shv > 0) A.sahod = shv; return; }
+      if ((m = /^(?:nakuha|expense|gastos)\s*[:=]\s*(.+?)\s*[:=]\s*([\d,\.]+)\s*$/i.exec(ln))) { var nkv = parseNum(m[2]); if (isFinite(nkv) && nkv > 0) A.nakuha.push({ label: m[1].trim(), amount: nkv }); return; }
+      if ((m = /^(?:pautang|utang)\s*[:=]\s*(.+?)\s*[:=]\s*([\d,\.]+)\s*$/i.exec(ln))) { var ptv = parseNum(m[2]); if (isFinite(ptv) && ptv > 0) A.pautang.push({ who: m[1].trim(), amount: ptv }); return; }
+      if (!/\d/.test(ln) && /^(stock|opening)/i.test(ln)) { mode = "stock"; return; }
+      if (!/\d/.test(ln) && /^(sold|sales|out)/i.test(ln)) { mode = "sold"; return; }
+      if (mode === "stock") {
+        if ((m = /^(.+?)\s*[:=]?\s*(\d+(?:\.\d+)?)\s*(?:\+\s*(\d+(?:\.\d+)?))?\s*(?:=\s*\d+(?:\.\d+)?)?\s*$/.exec(ln))) {
+          var sn = m[1].replace(/[:=x×\s]+$/i, "").trim(), sm = S.menu.filter(function (x) { return norm(x.name) === norm(sn); })[0];
+          stock.push({ text: sn, id: sm ? sm.id : "", open: Number(m[2]) || 0, add: Number(m[3]) || 0 });
+        }
+        return;
+      }
+      if ((m = /^total\s*[:=]\s*([\d,\.]+)/i.exec(ln))) { total = parseNum(m[1]); if (!isFinite(total)) total = null; return; }
+      if ((m = /^(.+?)\s*[:=]?\s*(\d+(?:\.\d+)?)\s*\/\s*(\d+(?:\.\d+)?)\s*$/.exec(ln))) {
+        var nm2 = m[1].replace(/[:=x×\s]+$/i, "").trim(), mm2 = S.menu.filter(function (x) { return norm(x.name) === norm(nm2); })[0];
+        items.push({ text: nm2, id: mm2 ? mm2.id : "", qty: Number(m[2]) || 0, tira: Number(m[3]), price: null, amount: null }); return;
+      }
+      if ((m = /^(.+?)\s*[:=x×]?\s*(\d+(?:\.\d+)?)\s*$/.exec(ln))) {
+        var nm = m[1].replace(/[:=x×\s]+$/i, "").trim(), mm = S.menu.filter(function (x) { return norm(x.name) === norm(nm); })[0];
+        items.push({ text: nm, id: mm ? mm.id : "", qty: Number(m[2]) || 0, price: null, amount: null });
+      }
+    });
+    if (!items.length && !stock.length && !A.sahod && !A.nakuha.length && !A.pautang.length) return false;
+    A.manual = true; A.res = { paper_total: total, notes: [] }; A.items = items; A.stock = stock; A.armStock = false; A.err = ""; A.armIns = false;
+    return true;
+  }
+
+  function asStockKey(id) { var m = menuById(id); if (!m) return null; var uk = Object.keys(m.use || {}); return uk.length === 1 && m.use[uk[0]] === 1 && stockById(uk[0]) ? uk[0] : null; }
+  function asStockDone(k) { var a = dparse(asDate()) - 120000, b = dparse(asDate()) + 120000; return S.moves.some(function (m) { return m.src === "paper" && m.stockId === k && m.ts >= a && m.ts <= b; }); }
+  function asInsertStock() {
+    if (!guardWrite()) return;
+    var D = asDate(), t0 = dparse(D), tCount = t0 - 60000, tAdd = t0 + 60000, prev = S.as.prev || "the last tindera", n = 0, skipped = 0;
+    S.as.stock.forEach(function (r) {
+      var k = asStockKey(r.id); if (!k || asStockDone(k)) { skipped++; return; }
+      var ref = ledgerAt(S.events, tCount), cur = ref.touched[k] ? (ref.on[k] || 0) : 0, diff = num(r.open - cur);
+      if (diff !== 0 || !ref.touched[k]) { S.db.collection("moves").add({ ts: tCount, at: Date.now(), stockId: k, qty: diff, kind: "adjust", note: "Tira of " + prev, counted: r.open, by: S.as.prev || "", src: "paper" }).catch(fail); n++; }
+      if (r.add > 0) { S.db.collection("moves").add({ ts: tAdd, at: Date.now(), stockId: k, qty: r.add, kind: "delivery", note: "Dagdag (from paper)", src: "paper" }).catch(fail); n++; }
+    });
+    S.as.armStock = false;
+    toast(n ? "Opening stock entered (" + n + " entries)" + (skipped ? " · " + skipped + " skipped" : "") : "Nothing new to enter" + (skipped ? " (" + skipped + " already entered or not matched)" : ""), !n);
+    renderAll(); refreshAssist();
+  }
+  function asOtherDone(id) { return S.expenses.some(function (x) { return x.id === id; }); }
+  function asInsertOthers() {
+    if (!guardWrite()) return;
+    var A = S.as, d = asDate(), ts = d === todayStr() ? Date.now() : new Date(dparse(d)).setHours(12, 0, 0, 0), n = 0;
+    (A.nakuha || []).forEach(function (x, k) { S.db.doc("expenses/paper-" + d + "-" + k).set({ ts: ts, at: Date.now(), label: x.label, amount: num(x.amount), src: "paper" }).catch(fail); n++; });
+    if (A.sahod > 0) { S.db.doc("expenses/sahod-" + d).set({ ts: ts, at: Date.now(), label: "Sahod", amount: num(A.sahod), sahod: true, src: "paper" }).catch(fail); n++; }
+    A.armOth = false; toast(n ? "Entered " + n + (n === 1 ? " item" : " items") + " (nakuha, sahod)" : "Nothing to enter", !n); renderAll(); refreshAssist();
+  }
+  function asInsert() {
+    if (!guardWrite()) return;
+    var A = S.as, cmp = asCompare(), who = A.who || onDuty(asDate());
+    var miss = cmp.lines.filter(function (l) { return l.diff > 0 && menuById(l.id); });
+    if (!miss.length) return;
+    if (!who) { toast("Choose whose paper this is first.", true); return; }
+    if (isClosedDay(asDate())) { toast("That day is closed. Reopen it on the Close tab first.", true); return; }
+    var oc = S.cart, om = S.mods, od = S.disc; S.cart = {}; S.mods = {}; S.disc = 0;
+    miss.forEach(function (l) { S.cart[l.id] = l.diff; });
+    var lines = cartLines(), total = num(lines.reduce(function (a, l) { return a + l.price * l.qty - l.off; }, 0));
+    S.cart = oc; S.mods = om; S.disc = od;
+    var d = asDate(), ts = d === todayStr() ? Date.now() : new Date(dparse(d)).setHours(12, 0, 0, 0);
+    var pu = (A.pautang || []).map(function (p, k) { return { id: "pu-" + d + "-" + k, who: p.who, amount: p.amount }; }).filter(function (p) { return !S.sales.some(function (x) { return x.id === p.id; }); });
+    var utSum = num(pu.reduce(function (a, p) { return a + p.amount; }, 0));
+    if (utSum > total) { pu = []; utSum = 0; }
+    var srec = { ts: ts, at: Date.now(), lines: lines, total: num(total - utSum), pay: "cash", voided: false, by: who, src: "paper" };
+    if (utSum > 0) srec.utangSplit = utSum;
+    S.db.collection("sales").add(srec).catch(fail);
+    pu.forEach(function (p) { S.db.doc("sales/" + p.id).set({ ts: ts, at: Date.now(), lines: [{ id: "paper-utang", name: "Pautang (paper)", price: p.amount, qty: 1, cost: 0, use: {}, off: 0, nr: 0, ne: 0, extra: true }], total: p.amount, pay: "utang", who: p.who, voided: false, by: who, src: "paper" }).catch(fail); });
+    A.armIns = false; toast("Added " + lines.length + (lines.length === 1 ? " item" : " items") + " · " + money(total)); renderAll(); refreshAssist();
+  }
+  document.addEventListener("change", function (e) {
+    var t = e.target; if (!t) return;
+    if (t.id === "asFile") { if (t.files && t.files[0]) asPhoto(t.files[0]); return; }
+    if (t.id === "asDate") { if (t.value) { S.as.date = t.value; S.as.armIns = false; refreshAssist(); } return; }
+    if (t.id === "asTotal") { var tv = parseNum(t.value); S.as.res.paper_total = isFinite(tv) ? tv : null; S.as.armIns = false; refreshAssist(); return; }
+    if (t.id === "asWho") { S.as.who = t.value; S.as.armIns = false; refreshAssist(); return; }
+    if (t.dataset && t.dataset.as) {
+      var it = S.as.items[+t.dataset.i]; if (!it) return;
+      if (t.dataset.as === "match") { it.id = t.value; var m = menuById(t.value); if (m && it.price === null) it.price = null; }
+      if (t.dataset.as === "qty") it.qty = Math.max(0, parseNum(t.value) || 0);
+      S.as.armIns = false; refreshAssist();
+    }
+  });
+
+
+  /* ---------- checks: is the day reliable? ---------- */
+  function checksPanel(key, rows) {
+    var a = dparse(key), b = dayMs(key, 1), flags = [];
+    var counts = S.moves.filter(function (m) { return m.ts >= a && m.ts < b && m.kind === "adjust" && typeof m.counted === "number" && Number(m.qty) !== 0; });
+    var miss = counts.filter(function (m) { return m.qty < 0; }), extra = counts.filter(function (m) { return m.qty > 0; });
+    var ctxt = function (l) { return l.map(function (m) { return esc(stockName(m.stockId)) + " " + qf(Math.abs(m.qty)) + (m.by ? " (" + esc(m.by) + ")" : ""); }).join(", "); };
+    if (miss.length) flags.push({ l: "bad", t: "Stock missing at count (tira was less than the app expected): " + ctxt(miss) + "." });
+    if (extra.length) flags.push({ l: "warn", t: "Stock extra at count (tira was more than the app expected): " + ctxt(extra) + ". Check that every sale was recorded." });
+    var neg = S.stock.filter(function (st) { var on = S.derived.onHand[st.id]; return S.derived.touched[st.id] && on < 0 && key === todayStr(); });
+    if (neg.length) flags.push({ l: "bad", t: "Stock below zero now: " + neg.map(function (st) { return esc(st.name) + " " + qf(S.derived.onHand[st.id]); }).join(", ") + ". More was sold or used than was added." });
+    var vd = S.sales.filter(function (x) { return x.voided && x.ts >= a && x.ts < b; });
+    if (vd.length) flags.push({ l: "warn", t: vd.length + " voided order" + (vd.length === 1 ? "" : "s") + " (" + money(vd.reduce(function (t, x) { return t + x.total; }, 0)) + ")" + (function () { var by = {}; vd.forEach(function (x) { by[x.by || "no name"] = (by[x.by || "no name"] || 0) + 1; }); return ": " + Object.keys(by).map(function (k) { return esc(k) + " " + by[k]; }).join(", "); })() + ". Make sure each one was a real mistake." });
+    var dc = rows.filter(function (x) { return x.discount > 0; });
+    if (dc.length) flags.push({ l: "warn", t: dc.length + " order" + (dc.length === 1 ? "" : "s") + " with discount, total " + money(dc.reduce(function (t, x) { return t + x.discount; }, 0)) + "." });
+    var shifts = shiftsOfDay(key), nob = rows.filter(function (x) { return !x.by; }).length;
+    if (shifts.length && nob) flags.push({ l: "warn", t: nob + " order" + (nob === 1 ? "" : "s") + " have no tindera name." });
+    var fp = rows.filter(function (x) { return x.src === "paper"; });
+    if (fp.length) flags.push({ l: "warn", t: fp.length + " order" + (fp.length === 1 ? " was" : "s were") + " added from the paper (" + money(fp.reduce(function (t, x) { return t + x.total; }, 0)) + ")." });
+    shifts.forEach(function (r) {
+      if (r.kind === "start") return;
+      if (typeof r.cashCount === "number" && num(r.cashCount - r.cashExp) < 0) flags.push({ l: "bad", t: r.out + " cash short " + money(-num(r.cashCount - r.cashExp)) + " at handover." });
+    });
+    var h = '<h2 class="sec">Checks</h2>';
+    if (!flags.length) return h + '<div class="note info">Nothing unusual today. Stock, tira and sales agree. ✓</div>';
+    return h + '<div class="panel"><ul class="list">' + flags.map(function (f) { return '<li><div style="padding:10px 12px"><span class="chip ' + f.l + '">' + (f.l === "bad" ? "Check" : "Note") + '</span> ' + f.t + '</div></li>'; }).join("") + '</ul></div>';
+  }
+
   /* ---------- payments, utang, expenses ---------- */
   function isCashPay(x) { return x.pay !== "gcash" && x.pay !== "utang"; }
   function sumPay(rows, kind) { return num(rows.filter(function (x) { return kind === "cash" ? isCashPay(x) : x.pay === kind; }).reduce(function (a, x) { return a + x.total; }, 0)); }
@@ -1367,7 +1673,9 @@ summary { font-weight: 700; cursor: pointer; min-height: 32px; }
       ["16. Mistake in stock?", ["On the <b>Stock</b> tab, scroll to <b>Recent changes</b> and tap <b>Undo</b> twice on the wrong entry.", "Or just do a new <b>Tira (remaining)</b> count to correct the number."]],
       ["17. Changing a price, egg or rice on a dish", ["Go to the <b>Menu</b> tab and tap the dish.", "Change the price, or untick <b>Show on the Sell screen</b> to hide it.", "<b>Comes with 1 egg</b> and <b>Comes with rice</b> are ticked for every meal. Untick them for a dish that has no egg or no rice. Extras (Rice, Egg, Styro) do not have these.", "Tap <b>Save item</b>."]],
       ["18. Tindera handover", ["Your tinderas start as <b>PAYDA</b> and <b>ROXANNE</b>. On the <b>Menu</b> tab, under <b>Tinderas</b>, you can change a name, tap <b>+ Add tindera</b>, or <b>Remove</b> one (not the one on duty).", "When the shop opens, the app asks <b>Who is selling?</b>. Tap the tindera on duty. Every sale is then saved under her name.", "When one goes out and another comes in, tap <b>Handover</b> on the Sell tab. Tap who is coming in.", "The tindera going out counts the cash and the stock. Type the cash she hands over. Change a stock number only if the real count is different.", "Tap <b>(name) received · Confirm</b>. The app saves who went out, who came in, the time, and any cash or stock that is short or over.", "It can happen many times a day: PAYDA out, ROXANNE in, then ROXANNE out, PAYDA in, and so on.", "See every shift on the <b>Close</b> tab under <b>Tindera shifts</b>. When you close the shop, the tindera on duty is ended automatically."]],
-      ["19. Important", ["All your data is saved <b>on this phone only</b>. Do not clear the browser’s data or history.", "Tap <b>Back up data</b> (Menu tab) every few days, and keep the file safe. It includes your utang and expenses.", "To use another phone, open the link there and tap <b>Restore data</b> with your backup file.", "<b>Delete test sales and stock history</b> erases all sales, stock, expenses and utang payments. Only use it before you start for real."]]
+      ["19. Egg and rice summary", ["On the <b>Close</b> and <b>Reports</b> tabs, see <b>Egg and rice sold</b>.", "<b>Combo</b> egg or rice = it came with a dish (a silog, sisig, wings and so on).", "<b>Solo</b> egg or rice = the customer ordered the Egg or Rice item by itself.", "Orders marked <b>No egg</b> or <b>No rice</b> are not counted as combo."]],
+      ["20. Help assistant (check the tindera’s paper)", ["Tap <b>Help</b> at the top of the screen.", "No API key (no money)? Tap <b>Type the paper myself (free)</b>, and add each line from the paper: pick the item and type the quantity.", "To read photos automatically, paste your Anthropic API key (once). It stays on this phone.", "Choose the date and whose paper it is, then tap <b>Take or choose photo</b>.", "Tap <b>Read the paper</b>. Fix any line the assistant got wrong (item and quantity).", "It shows paper vs app for each item, the totals, and a list of <b>Problems found</b>: missing or extra items, wrong prices, totals that do not add up.", "Tap <b>Add the missing items to the app</b> to record what is on the paper but not in the app. Tap twice to confirm."]],
+      ["21. Important", ["All your data is saved <b>on this phone only</b>. Do not clear the browser’s data or history.", "Tap <b>Back up data</b> (Menu tab) every few days, and keep the file safe. It includes your utang and expenses.", "To use another phone, open the link there and tap <b>Restore data</b> with your backup file.", "<b>Delete test sales and stock history</b> erases all sales, stock, expenses and utang payments. Only use it before you start for real."]]
     ];
     return '<style>.man{margin:6px 0 4px;padding-left:20px}.man li{margin:6px 0}</style><h2 class="sec">How to use this app</h2><div class="panel"><ul class="list">' + M.map(function (x) {
       return '<li><details><summary class="dsum"><span><b style="margin:0;font-size:16px">' + x[0] + '</b></span></summary><div class="dbody"><ol class="man">' + x[1].map(function (t) { return "<li>" + t + "</li>"; }).join("") + "</ol></div></details></li>";
@@ -1539,8 +1847,9 @@ summary { font-weight: 700; cursor: pointer; min-height: 32px; }
     var peak = Math.max.apply(null, items.map(function (i) { return i.v; }));
     h += '<h2 class="sec">' + ttl + '</h2><div class="panel chartbox">' + bars(items, every, vals) + '<div class="axis"><span>Tallest bar ' + money(peak) + "</span></div></div>";
     var agg = {};
-    rows.forEach(function (s) { s.lines.forEach(function (l) { var a = agg[l.id] || (agg[l.id] = { name: l.name, qty: 0, rev: 0 }); a.qty += l.qty; a.rev += l.qty * l.price - (l.off || 0); }); });
+    rows.forEach(function (s) { s.lines.forEach(function (l) { if (l.id === "paper-utang") return; var a = agg[l.id] || (agg[l.id] = { name: l.name, qty: 0, rev: 0 }); a.qty += l.qty; a.rev += l.qty * l.price - (l.off || 0); }); });
     var rank = Object.keys(agg).map(function (k) { return agg[k]; }).sort(function (a, b) { return b.qty - a.qty || b.rev - a.rev; }).slice(0, 10), mx = rank[0].qty;
+    h += eggRicePanel(rows);
     h += '<h2 class="sec">Best sellers</h2><div class="panel rank">' + rank.map(function (x) { return '<div class="r"><span class="r-name">' + esc(x.name) + '</span><span class="r-val">' + x.qty + " sold · " + money(x.rev) + '</span><span class="r-bar"><i style="width:' + Math.round(x.qty / mx * 100) + '%"></i></span></div>'; }).join("") + "</div>";
     h += '<p style="margin-top:14px"><button class="btn" data-act="export" type="button"' + (S.dl ? "" : " hidden") + '>Download these sales (CSV)</button></p>';
     return h + ordersList(r);
@@ -1553,7 +1862,7 @@ summary { font-weight: 700; cursor: pointer; min-height: 32px; }
     shown.forEach(function (s) {
       var items = (s.lines || []).map(function (l) { return l.qty + " " + l.name + optNote(l); }).join(", ");
       var armed = S.voidArm === s.id;
-      h += '<li><div class="sale' + (s.voided ? " void" : "") + '"><div><b>' + new Date(s.ts).toLocaleDateString("en-PH", { month: "short", day: "numeric" }) + " " + timeStr(s.ts) + '</b> <span class="chip">' + esc(payLabel(s)) + "</span>" + (s.by ? ' <span class="chip">' + esc(s.by) + '</span>' : "") + (s.voided ? ' <span class="chip bad">Voided</span>' : "") + '<div class="s-items">' + esc(items) + (s.discount ? " · discount " + money(s.discount) : "") + '</div></div><div class="s-total">' + money(s.total) + "</div></div>" +
+      h += '<li><div class="sale' + (s.voided ? " void" : "") + '"><div><b>' + new Date(s.ts).toLocaleDateString("en-PH", { month: "short", day: "numeric" }) + " " + timeStr(s.ts) + '</b> <span class="chip">' + esc(payLabel(s)) + "</span>" + (s.by ? ' <span class="chip">' + esc(s.by) + '</span>' : "") + (s.src === "paper" ? ' <span class="chip warn">From paper</span>' : "") + (s.voided ? ' <span class="chip bad">Voided</span>' : "") + '<div class="s-items">' + esc(items) + (s.discount ? " · discount " + money(s.discount) : "") + '</div></div><div class="s-total">' + money(s.total) + "</div></div>" +
         (s.voided || !S.canWrite ? "" : '<div class="s-acts"><button class="btn small' + (armed ? " primary" : "") + '" type="button" data-act="void" data-id="' + esc(s.id) + '">' + (armed ? "Tap again to void this order" : "Void") + "</button></div>") + "</li>";
     });
     h += "</ul></div>";
@@ -1568,6 +1877,7 @@ summary { font-weight: 700; cursor: pointer; min-height: 32px; }
       var pay = q(payLabel(s));
       s.lines.forEach(function (l) { out.push([dstr(s.ts), timeStr(s.ts), q(l.name + optNote(l)), l.qty, l.price, num(l.qty * l.price - (l.off || 0)), pay, q(s.by || "")].join(",")); });
       if (s.discount) out.push([dstr(s.ts), timeStr(s.ts), q("Discount"), 1, -s.discount, -s.discount, pay, q(s.by || "")].join(","));
+      if (s.utangSplit) out.push([dstr(s.ts), timeStr(s.ts), q("Pautang (recorded as utang)"), 1, -s.utangSplit, -s.utangSplit, pay, q(s.by || "")].join(","));
     });
     if (out.length === 1) { toast("No sales to download.", true); return; }
     S.dl.save({ filename: "tapsihan-sales-" + r.a + (r.a === r.b ? "" : "_to_" + r.b) + ".csv", data: out.join("\n") }).then(function () { toast("Saved"); }).catch(function (e) { if (!e || e.code !== "declined") toast("Download is not available here.", true); });
@@ -1576,6 +1886,13 @@ summary { font-weight: 700; cursor: pointer; min-height: 32px; }
   /* ---------- CLOSE ---------- */
   function closeRec(key) { return S.closes.filter(function (c) { return c.date === key; })[0]; }
   function isClosedDay(key) { return !!closeRec(key); }
+  function daySahod(key) { var a = dparse(key), b = dayMs(key, 1); return num(S.expenses.filter(function (e) { return e.sahod && e.ts >= a && e.ts < b; }).reduce(function (t, e) { return t + e.amount; }, 0)); }
+  function netPanel(key, total, utg, col) {
+    var ex = dayExpenses(key), sh = daySahod(key), other = num(ex - sh), net = num(total - utg + col - ex);
+    return '<div class="panel" style="padding:12px;margin-top:10px"><div style="display:flex;justify-content:space-between;align-items:baseline"><b>Net after sahod</b><b class="num" style="font-size:22px;color:' + (net >= 0 ? 'var(--ok)' : 'var(--accent)') + '">' + money(net) + '</b></div>' +
+      '<div class="s-sub">Sales ' + money(total) + (utg > 0 ? ' − pautang ' + money(utg) : '') + (col > 0 ? ' + utang paid ' + money(col) : '') + (other > 0 ? ' − nakuha/expenses ' + money(other) : '') + ' − sahod ' + money(sh) + '</div>' +
+      '<label class="field" style="margin-top:10px"><span>Sahod ng tindera (₱) <span class="hint">(taken off the day’s sales)</span></span><input id="sahodIn" inputmode="decimal" placeholder="0" value="' + (sh > 0 ? esc(sh) : "") + '"' + (S.canWrite ? "" : " disabled") + '></label></div>';
+  }
   function renderClose() {
     if (!allLoaded()) return '<div class="empty"><b>Loading…</b></div>';
     var ws = workStart(), key = dstr(ws), d1 = dayMs(key, 1) - 1, isToday = key === todayStr();
@@ -1588,6 +1905,7 @@ summary { font-weight: 700; cursor: pointer; min-height: 32px; }
     h += '<h2 class="sec">Summary · ' + esc(dlabel(ws)) + '</h2>';
     h += '<div class="stats"><div class="stat"><small>Sales</small><b>' + money(total) + '</b><span>' + rows.length + (rows.length === 1 ? " order" : " orders") + (disc > 0 ? " · " + money(disc) + " discounts" : "") + '</span></div>' +
       '<div class="stat"><small>Cash</small><b>' + money(cash) + '</b><span>GCash ' + money(gcash) + (utg > 0 ? ' · Utang ' + money(utg) : '') + '</span></div></div>';
+    h += netPanel(key, total, utg, dayCollected(key));
     (function () {
       var pf = profitStat(rows, total);
       if (pf.has || S.riceCost > 0) h += '<div class="panel" style="padding:12px;margin-top:10px"><div style="display:flex;justify-content:space-between;align-items:baseline"><b>Est. profit today</b><b style="font-size:20px;color:' + (pf.profit >= 0 ? 'var(--ok)' : 'var(--accent)') + '">' + money(pf.profit) + '</b></div><div class="s-sub">Sales ' + money(total) + ' − cost ' + money(pf.cost) + ' (stock, egg and rice)' + (total > 0 ? ' · ' + Math.round(pf.profit / total * 100) + '% margin' : '') + (dayExpenses(key) > 0 ? '<br>Expenses ' + money(dayExpenses(key)) + ' → take-home <b>' + money(pf.profit - dayExpenses(key)) + '</b>' : '') + '</div></div>';
@@ -1597,9 +1915,11 @@ summary { font-weight: 700; cursor: pointer; min-height: 32px; }
     })();
     h += '<div style="margin-top:10px"></div>' + targetBlock(key, total, rows, cl ? { closed: true, saved: (cl.target > 0 ? cl.target : stockPlan(key).total) } : { closed: false });
     h += shiftPanel(key, isToday);
+    h += checksPanel(key, rows);
+    h += eggRicePanel(rows);
     if (!cl && onDuty(key)) h += '<p style="margin:10px 0 0"><button class="btn" type="button" data-act="open-handover">Tindera handover</button></p>';
     var agg = {};
-    rows.forEach(function (s) { (s.lines || []).forEach(function (l) { var a = agg[l.id] || (agg[l.id] = { name: l.name, qty: 0, rev: 0 }); a.qty += l.qty; a.rev += l.qty * l.price - (l.off || 0); }); });
+    rows.forEach(function (s) { (s.lines || []).forEach(function (l) { if (l.id === "paper-utang") return; var a = agg[l.id] || (agg[l.id] = { name: l.name, qty: 0, rev: 0 }); a.qty += l.qty; a.rev += l.qty * l.price - (l.off || 0); }); });
     var rank = Object.keys(agg).map(function (k) { return agg[k]; }).sort(function (a, b) { return b.qty - a.qty || b.rev - a.rev; }).slice(0, 5);
     h += '<h2 class="sec">Best sellers</h2>';
     if (!rank.length) h += '<div class="panel"><div class="empty">No sales yet.</div></div>';
@@ -1781,6 +2101,19 @@ summary { font-weight: 700; cursor: pointer; min-height: 32px; }
       case "duty-start": startDuty(+b.dataset.i); break;
       case "shift-in": S.shiftIn = +b.dataset.i; openHandover(); break;
       case "do-handover": doHandover(); break;
+      case "open-assist": openAssist(); break;
+      case "as-manual": S.as.manual = true; S.as.res = { paper_total: null, notes: [] }; S.as.items = [{ text: "", id: "", qty: 1, price: null, amount: null }]; S.as.err = ""; refreshAssist(); break;
+      case "as-paste": if (!asParse(($("#asPaste") || {}).value)) { toast("No lines found. Write one item and number per line.", true); break; } refreshAssist(); break;
+      case "as-stock": if (!S.as.armStock) { S.as.armStock = true; refreshAssist(); break; } asInsertStock(); break;
+      case "as-pick": var af = $("#asFile"); if (af) af.click(); break;
+      case "as-read": asRead(); break;
+      case "as-reset": S.as = { img: "", manual: S.as.manual, who: S.as.who, date: "", busy: false, res: null, items: [], stock: [], prev: "", err: "", armIns: false, armStock: false }; refreshAssist(); break;
+      case "as-del": S.as.items.splice(+b.dataset.i, 1); S.as.armIns = false; refreshAssist(); break;
+      case "as-add": S.as.items.push({ text: "", id: "", qty: 1, price: null, amount: null }); refreshAssist(); break;
+      case "as-others": if (!S.as.armOth) { S.as.armOth = true; refreshAssist(); break; } asInsertOthers(); break;
+      case "as-insert": if (!S.as.armIns) { S.as.armIns = true; refreshAssist(); break; } asInsert(); break;
+      case "as-key-save": var kv = ($("#asKey").value || "").trim(); if (kv.length < 20) { toast("Paste the whole API key.", true); break; } try { localStorage.setItem("tapsihan_apikey", kv); } catch (x) {} toast("Key saved"); refreshAssist(); break;
+      case "as-key-clear": try { localStorage.removeItem("tapsihan_apikey"); } catch (x) {} refreshAssist(); break;
       case "add-staff":
         if (S.staff.length >= 8) { toast("That is enough tinderas for one shop.", true); break; }
         var nn2 = "Tindera " + (S.staff.length + 1); while (S.staff.indexOf(nn2) >= 0) nn2 += "+";
@@ -1818,6 +2151,13 @@ summary { font-weight: 700; cursor: pointer; min-height: 32px; }
       try { localStorage.setItem("tapsihan_staff", JSON.stringify(S.staff)); } catch (x) {}
       toast("Saved"); renderAll();
     }
+    else if (id === "sahodIn") {
+      if (!guardWrite()) { renderAll(); return; }
+      var sv = parseNum(v || 0); if (!(sv >= 0)) { toast("Enter an amount like 800.", true); return; }
+      var sk = dstr(workStart()), did = "expenses/sahod-" + sk;
+      if (sv === 0) { S.db.doc(did).delete().catch(fail); toast("Sahod removed"); }
+      else { S.db.doc(did).set({ ts: sk === todayStr() ? stamp() : dparse(sk) + 12 * 3600 * 1000, at: Date.now(), label: "Sahod", amount: num(sv), sahod: true }).catch(fail); toast("Sahod saved · " + money(sv)); }
+    }
     else if (id === "riceCostIn") {
       var rv = parseNum(v || 0); if (!(rv >= 0)) { toast("Enter an amount like 8.", true); return; }
       S.riceCost = rv;
@@ -1839,6 +2179,22 @@ summary { font-weight: 700; cursor: pointer; min-height: 32px; }
     if (/^[0-9.+%]$/.test(key) || "×÷−=⌫C".indexOf(key) >= 0 && key.length === 1) { e.preventDefault(); calcPress(key); }
   });
 
+/* ---------- Silog (rice + egg) ----------
+     Adds a plain "Silog" dish once. It is linked to the Egg stock, so every Silog sold takes 1 egg off
+     (20 eggs, sell 1 Silog, 19 left). Rice is not counted in stock, like the other meals (cost only).
+     Change its price any time on the Menu tab. */
+  function ensureSilog() {
+    if (S.silogChecked) return; S.silogChecked = true;
+    if (!S.db || !S.admin || !S.canWrite) return;
+    try { if (localStorage.getItem("tapsihan_silog_added")) return; } catch (e) {}
+    if (S.menu.some(function (m) { return /^silog$/i.test(String(m.name || "").trim()); })) return;
+    var eg = eggStock(), use = {}; if (eg) use[eg.id] = 1;
+    var order = S.menu.reduce(function (a, x) { return Math.max(a, x.order || 0); }, 0) + 1;
+    S.db.doc("menu/silog").set({ name: "Silog", price: 30, cat: "Silogs", order: order, active: true, use: use, egg: true, rice: true })
+      .then(function () { try { localStorage.setItem("tapsihan_silog_added", "1"); } catch (e) {} toast("Silog added to the menu. Set its price on the Menu tab."); })
+      .catch(fail);
+  }
+
 /* ---------- connect ---------- */
   renderAll();
   setInterval(function () { if (!document.hidden) renderHeader(); }, 60000);
@@ -1857,7 +2213,7 @@ summary { font-weight: 700; cursor: pointer; min-height: 32px; }
       db.collection(name).onSnapshot(function (snap) {
         S[name] = snap.docs.map(function (d) { var o = Object.assign({}, d.data()); o.id = d.id; return o; });
         S.loaded[name] = true;
-        if (allLoaded()) clearTimeout(timer);
+        if (allLoaded()) { clearTimeout(timer); ensureSilog(); }
         renderAll();
       }, function (err) { S.err = (err && err.code) || "error"; renderAll(); });
     });
